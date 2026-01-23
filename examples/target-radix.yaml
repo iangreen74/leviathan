@@ -1,0 +1,7 @@
+name: radix
+repo_url: git@github.com:iangreen74/radix.git
+default_branch: main
+local_cache_dir: ~/.leviathan/targets/radix
+contract_path: .leviathan/contract.yaml
+backlog_path: .leviathan/backlog.yaml
+policy_path: .leviathan/policy.yaml

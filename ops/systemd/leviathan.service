@@ -1,0 +1,21 @@
+[Unit]
+Description=Leviathan Autonomous Agent (Node A)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ian/leviathan
+EnvironmentFile=%h/.leviathan/env
+ExecStart=/usr/bin/python3 -m leviathan.runner --target %h/.leviathan/targets/radix.yaml --loop --sleep-seconds ${LEVIATHAN_SLEEP_SECONDS:-300}
+Restart=on-failure
+RestartSec=60
+StandardOutput=append:%h/.leviathan/logs/leviathan.log
+StandardError=append:%h/.leviathan/logs/leviathan.log
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

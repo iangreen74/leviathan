@@ -14,6 +14,7 @@ from leviathan.graph.store import GraphStore
 from leviathan.graph.schema import NodeType, EdgeType
 from leviathan.artifacts.store import ArtifactStore
 from leviathan.executors.base import Executor, AttemptResult
+from leviathan.backlog_loader import load_backlog_tasks, filter_ready_tasks
 
 
 class RetryPolicy:
@@ -320,6 +321,55 @@ class Scheduler:
         
         return True
     
+    def load_backlog_into_graph(self, target_id: str, backlog_path: Path):
+        """
+        Load tasks from backlog YAML file into graph.
+        
+        Args:
+            target_id: Target identifier
+            backlog_path: Path to backlog YAML file
+        """
+        # Load and normalize backlog tasks
+        tasks = load_backlog_tasks(backlog_path)
+        
+        # Filter to ready tasks only
+        ready_tasks = filter_ready_tasks(tasks)
+        
+        # Create TASK_CREATED events for each ready task
+        for task_data in ready_tasks:
+            task_id = task_data['id']
+            
+            # Check if task already exists in graph
+            existing_task = self.graph_store.get_node(task_id)
+            if existing_task:
+                # Task already in graph, skip
+                continue
+            
+            # Create task event
+            event = Event(
+                event_id=str(uuid.uuid4()),
+                event_type=EventType.TASK_CREATED,
+                timestamp=datetime.utcnow(),
+                actor_id="scheduler",
+                payload={
+                    'task_id': task_id,
+                    'node_id': task_id,
+                    'node_type': 'Task',
+                    'target_id': target_id,
+                    'title': task_data.get('title', 'Unknown'),
+                    'scope': task_data.get('scope', 'unknown'),
+                    'priority': task_data.get('priority', 'medium'),
+                    'estimated_size': task_data.get('estimated_size', 'unknown'),
+                    'allowed_paths': task_data.get('allowed_paths', []),
+                    'acceptance_criteria': task_data.get('acceptance_criteria', []),
+                    'status': 'pending',
+                    'created_at': datetime.utcnow().isoformat()
+                }
+            )
+            
+            self.event_store.append_event(event)
+            self.graph_store.apply_event(event)
+    
     def run_once(self, target_id: str, target_config: Dict[str, Any]) -> bool:
         """
         Run scheduler once: select task, create attempt, execute.
@@ -331,6 +381,12 @@ class Scheduler:
         Returns:
             True if task was executed, False if no tasks ready
         """
+        # Load backlog tasks into graph if backlog_path provided
+        if 'backlog_path' in target_config:
+            backlog_path = Path(target_config['backlog_path'])
+            if backlog_path.exists():
+                self.load_backlog_into_graph(target_id, backlog_path)
+        
         # Select next ready task
         task = self.select_next_task(target_id)
         

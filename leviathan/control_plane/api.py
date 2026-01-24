@@ -1,0 +1,333 @@
+"""
+Leviathan Graph Control Plane API.
+
+FastAPI application for event ingestion and graph queries.
+
+Usage:
+    export LEVIATHAN_CONTROL_PLANE_TOKEN=your-secret-token
+    python3 -m leviathan.control_plane.api
+"""
+import sys
+import os
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, Field
+import uvicorn
+
+from leviathan.control_plane.config import get_config, ControlPlaneConfig
+from leviathan.graph.events import EventStore, Event, EventType
+from leviathan.graph.store import GraphStore
+from leviathan.graph.schema import NodeType, EdgeType
+from leviathan.artifacts.store import ArtifactStore
+
+
+# Pydantic models for API requests/responses
+
+class ArtifactRef(BaseModel):
+    """Reference to an artifact in an event bundle."""
+    sha256: str
+    kind: str
+    uri: str
+    size: int
+
+
+class EventIngestRequest(BaseModel):
+    """Request model for event ingestion."""
+    target: str
+    bundle_id: str
+    events: List[Dict[str, Any]]
+    artifacts: Optional[List[ArtifactRef]] = None
+
+
+class EventIngestResponse(BaseModel):
+    """Response model for event ingestion."""
+    ingested: int
+    bundle_id: str
+    status: str
+
+
+class HealthResponse(BaseModel):
+    """Health check response."""
+    status: str
+
+
+class EventSummary(BaseModel):
+    """Summary of an event."""
+    event_id: str
+    timestamp: str
+    event_type: str
+    actor_id: Optional[str]
+    target: Optional[str]
+    attempt_id: Optional[str]
+
+
+class GraphSummaryResponse(BaseModel):
+    """Graph summary response."""
+    nodes_by_type: Dict[str, int]
+    edges_by_type: Dict[str, int]
+    recent_events: List[EventSummary]
+
+
+class AttemptResponse(BaseModel):
+    """Attempt details response."""
+    attempt_node: Optional[Dict[str, Any]]
+    events: List[Dict[str, Any]]
+    artifacts: List[Dict[str, Any]]
+
+
+# Global state (initialized on startup)
+config: Optional[ControlPlaneConfig] = None
+event_store: Optional[EventStore] = None
+graph_store: Optional[GraphStore] = None
+artifact_store: Optional[ArtifactStore] = None
+
+
+def initialize_stores():
+    """Initialize stores (called on startup or lazily)."""
+    global config, event_store, graph_store, artifact_store
+    
+    if event_store is not None:
+        return  # Already initialized
+    
+    try:
+        config = get_config()
+    except ValueError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        print("Set LEVIATHAN_CONTROL_PLANE_TOKEN environment variable", file=sys.stderr)
+        sys.exit(1)
+    
+    # Initialize stores based on backend
+    if config.backend == "postgres":
+        event_store = EventStore(backend="postgres", postgres_url=config.postgres_url)
+        graph_store = GraphStore(backend="postgres", postgres_url=config.postgres_url)
+    else:
+        event_store = EventStore(backend="ndjson")
+        graph_store = GraphStore(backend="memory")
+    
+    artifact_store = ArtifactStore(storage_root=config.artifacts_dir)
+    
+    print(f"Leviathan Control Plane API initialized")
+    print(f"Backend: {config.backend}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup/shutdown."""
+    # Startup
+    initialize_stores()
+    
+    yield
+    
+    # Shutdown
+    if event_store:
+        event_store.close()
+    if graph_store:
+        graph_store.close()
+
+
+# FastAPI app
+app = FastAPI(
+    title="Leviathan Graph Control Plane API",
+    description="Event ingestion and graph query API for Leviathan",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+security = HTTPBearer()
+
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+    """
+    Verify bearer token.
+    
+    Raises:
+        HTTPException: 401 if token is invalid
+    """
+    # Lazy initialization for tests
+    if not config:
+        initialize_stores()
+    
+    if credentials.credentials != config.token:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    return credentials.credentials
+
+
+@app.get("/healthz", response_model=HealthResponse)
+async def healthz():
+    """Health check endpoint."""
+    return HealthResponse(status="ok")
+
+
+@app.post("/v1/events/ingest", response_model=EventIngestResponse)
+async def ingest_events(
+    request: EventIngestRequest,
+    token: str = Depends(verify_token)
+):
+    """
+    Ingest event bundle from executor.
+    
+    Args:
+        request: Event bundle with events and optional artifact references
+        token: Verified bearer token
+        
+    Returns:
+        Ingestion confirmation
+    """
+    if not event_store or not graph_store:
+        raise HTTPException(status_code=500, detail="Stores not initialized")
+    
+    ingested_count = 0
+    
+    # Append events to event store
+    for event_data in request.events:
+        # Convert dict to Event object
+        event = Event(**event_data)
+        
+        # Append to event store (hash chain computed automatically)
+        event_store.append_event(event)
+        
+        # Apply to graph projection
+        graph_store.apply_event(event)
+        
+        ingested_count += 1
+    
+    # Record artifact references if present
+    if request.artifacts and artifact_store:
+        for artifact_ref in request.artifacts:
+            # Artifact metadata already stored by executor
+            # We just validate it exists
+            if not artifact_store.exists(artifact_ref.sha256):
+                print(f"Warning: artifact {artifact_ref.sha256} not found in store")
+    
+    return EventIngestResponse(
+        ingested=ingested_count,
+        bundle_id=request.bundle_id,
+        status="ok"
+    )
+
+
+@app.get("/v1/graph/summary", response_model=GraphSummaryResponse)
+async def graph_summary(token: str = Depends(verify_token)):
+    """
+    Get graph summary with node/edge counts and recent events.
+    
+    Args:
+        token: Verified bearer token
+        
+    Returns:
+        Graph summary
+    """
+    if not event_store or not graph_store:
+        raise HTTPException(status_code=500, detail="Stores not initialized")
+    
+    # Count nodes by type
+    nodes_by_type = {}
+    for node_type in NodeType:
+        count = len(graph_store.query_nodes(node_type=node_type))
+        if count > 0:
+            nodes_by_type[node_type.value] = count
+    
+    # Count edges by type
+    edges_by_type = {}
+    for edge_type in EdgeType:
+        count = len(graph_store.query_edges(edge_type=edge_type))
+        if count > 0:
+            edges_by_type[edge_type.value] = count
+    
+    # Get last 20 events
+    all_events = event_store.get_events()
+    recent_events_data = all_events[-20:] if len(all_events) > 20 else all_events
+    
+    recent_events = []
+    for event in reversed(recent_events_data):  # Most recent first
+        recent_events.append(EventSummary(
+            event_id=event.event_id,
+            timestamp=event.timestamp.isoformat(),
+            event_type=event.event_type,
+            actor_id=event.actor_id,
+            target=event.payload.get('target_id'),
+            attempt_id=event.payload.get('attempt_id')
+        ))
+    
+    return GraphSummaryResponse(
+        nodes_by_type=nodes_by_type,
+        edges_by_type=edges_by_type,
+        recent_events=recent_events
+    )
+
+
+@app.get("/v1/attempts/{attempt_id}", response_model=AttemptResponse)
+async def get_attempt(
+    attempt_id: str,
+    token: str = Depends(verify_token)
+):
+    """
+    Get attempt details including node, events, and artifacts.
+    
+    Args:
+        attempt_id: Attempt identifier
+        token: Verified bearer token
+        
+    Returns:
+        Attempt details
+    """
+    if not event_store or not graph_store:
+        raise HTTPException(status_code=500, detail="Stores not initialized")
+    
+    # Get attempt node
+    attempt_node = graph_store.get_node(attempt_id)
+    
+    # Get related events
+    all_events = event_store.get_events()
+    related_events = [
+        {
+            'event_id': e.event_id,
+            'event_type': e.event_type,
+            'timestamp': e.timestamp.isoformat(),
+            'actor_id': e.actor_id,
+            'payload': e.payload
+        }
+        for e in all_events
+        if e.payload.get('attempt_id') == attempt_id
+    ]
+    
+    # Get related artifacts (via PRODUCED edges)
+    artifact_edges = graph_store.query_edges(from_node=attempt_id, edge_type=EdgeType.PRODUCED)
+    artifacts = []
+    for edge in artifact_edges:
+        artifact_node = graph_store.get_node(edge['to_node'])
+        if artifact_node:
+            artifacts.append(artifact_node)
+    
+    return AttemptResponse(
+        attempt_node=attempt_node,
+        events=related_events,
+        artifacts=artifacts
+    )
+
+
+def main():
+    """Run the API server."""
+    # Load config to get host/port
+    try:
+        cfg = get_config()
+    except ValueError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        print("Set LEVIATHAN_CONTROL_PLANE_TOKEN environment variable", file=sys.stderr)
+        sys.exit(1)
+    
+    uvicorn.run(
+        "leviathan.control_plane.api:app",
+        host=cfg.host,
+        port=cfg.port,
+        reload=False
+    )
+
+
+if __name__ == "__main__":
+    main()

@@ -24,6 +24,7 @@ from leviathan.exec import CommandExecutor
 from leviathan.model_client import ModelClient, PatchValidationError
 from leviathan.conflict_prevention import ConflictPrevention, ConflictPreventionError
 from leviathan.rewrite_mode import RewriteModeError
+from leviathan.target_config import TargetConfig
 
 
 def sanitize_diff(diff_text: str) -> str:
@@ -118,12 +119,21 @@ class ExecutionLogger:
 class LeviathanRunner:
     """Main runner orchestrator."""
     
-    def __init__(self, repo_root: Path, once: bool = False, sleep_seconds: int = 300):
+    def __init__(self, repo_root: Path, once: bool = False, sleep_seconds: int = 300, 
+                 target_config: Optional[TargetConfig] = None, dry_run: bool = False):
         self.repo_root = repo_root
         self.once = once
         self.sleep_seconds = sleep_seconds
+        self.target_config = target_config
+        self.dry_run = dry_run
         
-        self.backlog = Backlog(repo_root / 'docs/reports/agent_backlog.yaml')
+        # Determine backlog path: use target config if provided, else default
+        if target_config:
+            backlog_path = target_config.get_backlog_full_path()
+        else:
+            backlog_path = repo_root / 'docs/reports/agent_backlog.yaml'
+        
+        self.backlog = Backlog(backlog_path)
         self.github = GitHubClient(repo_root)
         self.executor = CommandExecutor(repo_root)
         self.model = ModelClient(repo_root=repo_root)
@@ -592,10 +602,88 @@ Task-ID: {task.id}
         
         return True
     
+    def run_dry_run(self):
+        """Run in dry-run mode: select and print next task without making changes."""
+        Console.header("Leviathan v0 Dry Run Mode")
+        Console.info(f"Repository: {self.repo_root}")
+        
+        if self.target_config:
+            Console.info(f"Target: {self.target_config.name}")
+            Console.info(f"Cache: {self.target_config.local_cache_dir}")
+            
+            # Ensure target repo is cloned/fetched
+            self._ensure_target_repo()
+        
+        # Select next task
+        task = self.backlog.select_next_task()
+        
+        if not task:
+            Console.info("No ready tasks available")
+            return
+        
+        # Print task details
+        Console.header(f"Next Task: {task.id}")
+        print(f"Title: {task.title}")
+        print(f"Scope: {task.scope}")
+        print(f"Priority: {task.priority}")
+        print(f"Size: {task.estimated_size}")
+        print(f"\nAllowed Paths:")
+        for path in task.allowed_paths:
+            print(f"  - {path}")
+        print(f"\nAcceptance Criteria:")
+        for criterion in task.acceptance_criteria:
+            print(f"  - {criterion}")
+    
+    def _ensure_target_repo(self):
+        """Ensure target repository is cloned and up-to-date."""
+        if not self.target_config:
+            return
+        
+        cache_dir = self.target_config.local_cache_dir
+        
+        if not cache_dir.exists():
+            Console.info(f"Cloning target repo to {cache_dir}...")
+            cache_dir.parent.mkdir(parents=True, exist_ok=True)
+            
+            result = subprocess.run(
+                ['git', 'clone', self.target_config.repo_url, str(cache_dir)],
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode != 0:
+                Console.error(f"Failed to clone target repo: {result.stderr}")
+                sys.exit(1)
+            
+            Console.success("Target repo cloned")
+        else:
+            Console.info("Fetching latest from target repo...")
+            
+            result = subprocess.run(
+                ['git', 'fetch', 'origin'],
+                capture_output=True,
+                text=True,
+                cwd=cache_dir
+            )
+            
+            if result.returncode != 0:
+                Console.warning(f"Failed to fetch: {result.stderr}")
+            else:
+                Console.success("Target repo updated")
+    
     def run(self):
         """Main run loop."""
         Console.header("Leviathan v0 Automated Runner")
         Console.info(f"Repository: {self.repo_root}")
+        
+        if self.target_config:
+            Console.info(f"Target: {self.target_config.name}")
+        
+        if self.dry_run:
+            Console.info("Mode: dry-run")
+            self.run_dry_run()
+            return
+        
         Console.info(f"Mode: {'once' if self.once else 'loop'}")
         
         if self.once:
@@ -611,17 +699,40 @@ Task-ID: {task.id}
 
 def main():
     parser = argparse.ArgumentParser(description='Leviathan v0 Automated Runner')
+    parser.add_argument('--target', type=str, help='Path to target YAML config file')
+    parser.add_argument('--dry-run', action='store_true', help='Select and print next task without making changes')
     parser.add_argument('--once', action='store_true', help='Run once and exit')
     parser.add_argument('--loop', action='store_true', help='Run in continuous loop')
     parser.add_argument('--sleep-seconds', type=int, default=300, help='Sleep duration between iterations (default: 300)')
     
     args = parser.parse_args()
     
+    # Load target config if provided
+    target_config = None
+    if args.target:
+        target_path = Path(args.target).expanduser()
+        try:
+            target_config = TargetConfig.from_yaml(target_path)
+        except (FileNotFoundError, ValueError) as e:
+            Console.error(f"Failed to load target config: {e}")
+            sys.exit(1)
+    
+    # Determine repo root: use target cache if available, else leviathan repo
+    if target_config:
+        repo_root = target_config.local_cache_dir
+    else:
+        repo_root = Path(__file__).parent.parent.parent
+    
     # Default to once mode if neither specified
     once = args.once or not args.loop
     
-    repo_root = Path(__file__).parent.parent.parent
-    runner = LeviathanRunner(repo_root, once=once, sleep_seconds=args.sleep_seconds)
+    runner = LeviathanRunner(
+        repo_root, 
+        once=once, 
+        sleep_seconds=args.sleep_seconds,
+        target_config=target_config,
+        dry_run=args.dry_run
+    )
     
     try:
         runner.run()

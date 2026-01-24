@@ -1,0 +1,64 @@
+# Leviathan Self-Target Contract
+# Defines the purpose, scope, and safety constraints for Leviathan managing itself
+
+name: leviathan
+purpose: Graph-native autonomy control plane for managing software development tasks
+
+description: |
+  Leviathan is an event-sourced, graph-driven control plane that orchestrates
+  autonomous code generation and testing workflows. It manages targets (repositories)
+  by selecting tasks, creating attempts, executing them via pluggable executors,
+  and tracking all actions as immutable events in a hash-chained journal.
+  
+  This contract defines how Leviathan can manage itself as a target, enabling
+  self-improvement and self-maintenance while maintaining strict safety guarantees.
+
+definition_of_done:
+  - Can run scheduler + executor on itself and other targets (e.g., radix)
+  - No runtime repository writes (all changes via PR workflow)
+  - Jobs are ephemeral (one task per Job, then exit)
+  - All actions are evented (append-only event store with hash chain)
+  - Graph projection is deterministic from event replay
+  - Artifacts are content-addressed (SHA256 deduplication)
+  - Tests pass before PR creation
+  - Documentation is updated for new features
+
+safety:
+  output_mode: pr_only
+  human_approval_required: true
+  constraints:
+    - All code changes must go through pull request workflow
+    - Human must review and merge PRs (no auto-merge)
+    - No direct commits to main branch
+    - No modifications to .git/ or git history
+    - No secret exposure in logs or artifacts
+    - No deletion of event store or graph data
+    - Scheduler respects retry limits and backoff policies
+
+scope:
+  in_scope:
+    - Documentation improvements and additions
+    - Unit test additions and improvements
+    - Bug fixes in core modules
+    - New features aligned with roadmap
+    - Performance optimizations
+    - Operational runbooks and guides
+    - Self-maintenance tasks
+  
+  out_of_scope:
+    - Breaking API changes without migration path
+    - Removal of existing features without deprecation
+    - Changes to event schema without versioning
+    - Modifications to deployed infrastructure
+    - Direct database schema changes (use migrations)
+
+quality_gates:
+  - All unit tests must pass
+  - Code coverage must not decrease
+  - No new linting errors
+  - Documentation updated for user-facing changes
+  - Commit messages follow conventional commits format
+
+versioning:
+  contract_version: "0.1.0"
+  last_updated: "2026-01-24"

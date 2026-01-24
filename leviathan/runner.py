@@ -26,6 +26,7 @@ from leviathan.conflict_prevention import ConflictPrevention, ConflictPrevention
 from leviathan.rewrite_mode import RewriteModeError
 from leviathan.target_config import TargetConfig
 from leviathan.worktree_executor import WorktreeExecutor, WorktreeError
+from typing import Dict, Tuple
 
 
 def sanitize_diff(diff_text: str) -> str:
@@ -398,14 +399,83 @@ class LeviathanRunner:
             # ALWAYS cleanup worktree, even on failure
             worktree_exec.cleanup_worktree(force=True)
     
-    def _execute_task_direct(self, task: Task, workspace_root: Optional[Path] = None) -> bool:
-        """Execute task directly (legacy mode or within a worktree)."""
+    def _execute_task_direct(self, task: Task, workspace_root: Optional[Path] = None, max_attempts: int = 3) -> bool:
+        """
+        Execute task directly (legacy mode or within a worktree) with repair loop.
         
+        Args:
+            task: Task to execute
+            workspace_root: Optional worktree path (None for legacy mode)
+            max_attempts: Maximum number of attempts (default 3)
+            
+        Returns:
+            True if task succeeded, False otherwise
+        """
         # Use workspace_root if provided (worktree mode), else use repo_root
         work_root = workspace_root if workspace_root else self.repo_root
         
         # Determine mode: rewrite for small tasks (<=5 files), diff for larger
         use_rewrite_mode = len(task.allowed_paths) <= 5
+        
+        # Per-task attempt loop for convergence
+        last_failure_context = None
+        
+        for attempt in range(1, max_attempts + 1):
+            Console.info(f"{'='*60}")
+            Console.info(f"Attempt {attempt}/{max_attempts}")
+            Console.info(f"{'='*60}")
+            
+            success, failure_context = self._execute_single_attempt(
+                task, 
+                workspace_root, 
+                use_rewrite_mode,
+                attempt,
+                retry_context=last_failure_context
+            )
+            
+            if success:
+                Console.success(f"✅ Task succeeded on attempt {attempt}/{max_attempts}")
+                return True
+            
+            # Store failure context for next retry
+            last_failure_context = failure_context
+            
+            # If this was the last attempt, fail
+            if attempt >= max_attempts:
+                Console.error(f"❌ Task failed after {max_attempts} attempts")
+                Console.error(f"Final failure: {failure_context.get('failure_type', 'unknown')}")
+                return False
+            
+            # Otherwise, retry with feedback
+            Console.warning(f"⚠️  Attempt {attempt} failed: {failure_context.get('failure_type', 'unknown')}")
+            Console.info(f"Retrying with test failure feedback...")
+        
+        return False
+    
+    def _execute_single_attempt(
+        self, 
+        task: Task, 
+        workspace_root: Optional[Path],
+        use_rewrite_mode: bool,
+        attempt_number: int,
+        retry_context: Optional[Dict[str, str]] = None
+    ) -> Tuple[bool, Dict[str, str]]:
+        """
+        Execute a single attempt at implementing a task.
+        
+        Args:
+            task: Task to execute
+            workspace_root: Optional worktree path
+            use_rewrite_mode: Whether to use rewrite mode
+            attempt_number: Current attempt number (1-indexed)
+            retry_context: Optional context from previous failed attempt
+        
+        Returns:
+            Tuple of (success, failure_context)
+            - success: True if tests passed
+            - failure_context: Dict with 'failure_type' and 'test_output' if failed
+        """
+        work_root = workspace_root if workspace_root else self.repo_root
         
         # Step 1: Generate implementation
         Console.step(1, 6, "Generating implementation")
@@ -415,26 +485,31 @@ class LeviathanRunner:
         if workspace_root:
             self.model.repo_root = workspace_root
         
+        skip_patch_step = False
         try:
             if use_rewrite_mode:
                 Console.info(f"Using rewrite mode ({len(task.allowed_paths)} file(s))")
                 try:
-                    written_paths, source = self.model.generate_implementation_rewrite_mode(task)
+                    written_paths, source = self.model.generate_implementation_rewrite_mode(
+                        task, 
+                        retry_context=retry_context
+                    )
                     Console.success(f"Implementation generated via {source} (rewrite mode)")
-                    # Skip patch application step since files are already written
                     skip_patch_step = True
                 except RewriteModeError as e:
                     Console.error(f"Rewrite mode failed: {str(e)}")
                     self.logger.log_event('rewrite_mode_failed', task.id, {
-                        'error': str(e)
+                        'error': str(e),
+                        'attempt': attempt_number
                     })
-                    return False
+                    return False, {'failure_type': 'rewrite_validation_failure', 'test_output': str(e)}
                 except Exception as e:
                     Console.error(f"Implementation generation failed: {str(e)}")
                     self.logger.log_event('generation_failed', task.id, {
-                        'error': str(e)
+                        'error': str(e),
+                        'attempt': attempt_number
                     })
-                    return False
+                    return False, {'failure_type': 'generation_failure', 'test_output': str(e)}
             else:
                 Console.info(f"Using diff mode ({len(task.allowed_paths)} file(s))")
                 try:
@@ -444,18 +519,20 @@ class LeviathanRunner:
                 except PatchValidationError as e:
                     Console.error(f"Patch validation failed: {str(e)}")
                     self.logger.log_event('patch_validation_failed', task.id, {
-                        'error': str(e)
+                        'error': str(e),
+                        'attempt': attempt_number
                     })
-                    return False
+                    return False, {'failure_type': 'patch_validation_failure', 'test_output': str(e)}
                 except FileNotFoundError as e:
                     Console.warning(str(e))
-                    return False
+                    return False, {'failure_type': 'file_not_found', 'test_output': str(e)}
                 except Exception as e:
                     Console.error(f"Implementation generation failed: {str(e)}")
                     self.logger.log_event('generation_failed', task.id, {
-                        'error': str(e)
+                        'error': str(e),
+                        'attempt': attempt_number
                     })
-                    return False
+                    return False, {'failure_type': 'generation_failure', 'test_output': str(e)}
         finally:
             # Restore original repo_root
             self.model.repo_root = original_repo_root
@@ -554,14 +631,17 @@ class LeviathanRunner:
         else:
             test_executor = self.executor
         
+        Console.info(f"Running targeted tests for scope: {task.scope}")
         test_success, test_output = test_executor.run_test_suite(task.scope, task.allowed_paths)
         
         if not test_success:
-            Console.error(f"Tests failed:\n{test_output}")
+            Console.error(f"Tests failed (attempt {attempt_number})")
             self.logger.log_event('tests_failed', task.id, {
-                'output': test_output
+                'output': test_output,
+                'attempt': attempt_number
             })
-            return False
+            # Return failure with test output for retry feedback
+            return False, {'failure_type': 'test_failure', 'test_output': test_output}
         
         Console.success("Tests passed")
         
@@ -583,8 +663,10 @@ class LeviathanRunner:
         
         if not status_result.stdout.strip():
             Console.error("No changes to commit (patch may not have applied)")
-            self.logger.log_event('no_changes_to_commit', task.id, {})
-            return False
+            self.logger.log_event('no_changes_to_commit', task.id, {
+                'attempt': attempt_number
+            })
+            return False, {'failure_type': 'no_changes', 'test_output': 'No changes detected'}
         
         Console.success(f"Changes detected: {len(status_result.stdout.strip().splitlines())} files")
         
@@ -617,7 +699,7 @@ class LeviathanRunner:
         
         if result.returncode != 0:
             Console.error(f"Failed to commit: {result.stderr}")
-            return False
+            return False, {'failure_type': 'commit_failure', 'test_output': result.stderr}
         
         Console.success("Changes committed")
         
@@ -631,16 +713,17 @@ class LeviathanRunner:
                 Console.error(f"Merge conflict predicted: {conflict_reason}")
                 self.logger.log_event('merge_conflict_predicted', task.id, {
                     'reason': conflict_reason,
-                    'branch': branch_name
+                    'branch': branch_name,
+                    'attempt': attempt_number
                 })
                 self.backlog.update_task_status(task.id, status='blocked')
-                return False
+                return False, {'failure_type': 'merge_conflict', 'test_output': conflict_reason}
             
             Console.success("Branch is mergeable")
             
             if not self.github.push_branch(branch_name):
                 Console.error("Failed to push branch")
-                return False
+                return False, {'failure_type': 'push_failure', 'test_output': 'Failed to push branch'}
             
             Console.success("Changes pushed")
         
@@ -679,9 +762,10 @@ Task-ID: {task.id}
         except Exception as e:
             Console.error(f"Failed to create PR: {str(e)}")
             self.logger.log_event('pr_creation_failed', task.id, {
-                'error': str(e)
+                'error': str(e),
+                'attempt': attempt_number
             })
-            return False
+            return False, {'failure_type': 'pr_creation_failure', 'test_output': str(e)}
         
         Console.pr_created(pr_number, pr_url)
         
@@ -693,22 +777,14 @@ Task-ID: {task.id}
             branch_name=branch_name
         )
         
-        # Log PR creation
-        self.logger.log_event('pr_created', task.id, {
+        self.logger.log_event('task_completed', task.id, {
             'pr_number': pr_number,
             'pr_url': pr_url,
-            'branch_name': branch_name
+            'branch_name': branch_name,
+            'attempt': attempt_number
         })
         
-        # Record in state DB
-        if self.state:
-            self.state.record_task_execution(
-                task_id=task.id,
-                status='pr_opened',
-                pr_number=pr_number,
-                pr_url=pr_url,
-                branch_name=branch_name
-            )
+        Console.success(f"✅ Task {task.id} completed successfully!")
         
         # Monitor CI (if PR number available)
         if pr_number and self.github.token:
@@ -720,13 +796,15 @@ Task-ID: {task.id}
             self.logger.log_event('ci_completed', task.id, {
                 'pr_number': pr_number,
                 'state': final_state,
-                'details': details
+                'details': details,
+                'attempt': attempt_number
             })
             
             if final_state == 'success':
                 self.backlog.update_task_status(task.id, status='ready_to_merge')
         
-        return True
+        # Return success (no failure context needed)
+        return True, {}
     
     def run_dry_run(self):
         """Run in dry-run mode: select and print next task without making changes."""

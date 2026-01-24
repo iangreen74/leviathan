@@ -122,20 +122,34 @@ systemctl --user start leviathan
 ```bash
 cd /home/ian/leviathan
 
-# Dry run (shows next task)
+# Dry run (shows next task without making changes)
 python3 -m leviathan.runner \
   --target ~/.leviathan/targets/radix.yaml \
   --dry-run
 
-# Execute one task
+# Execute one task and exit
 python3 -m leviathan.runner \
   --target ~/.leviathan/targets/radix.yaml \
   --once
 
-# Continuous mode
+# Continuous loop mode (default sleep: 300s)
 python3 -m leviathan.runner \
-  --target ~/.leviathan/targets/radix.yaml
+  --target ~/.leviathan/targets/radix.yaml \
+  --loop
+
+# Continuous loop with custom sleep interval
+python3 -m leviathan.runner \
+  --target ~/.leviathan/targets/radix.yaml \
+  --loop \
+  --sleep-seconds 600
 ```
+
+**CLI Arguments:**
+- `--target PATH`: Path to target YAML config (required for external repos)
+- `--dry-run`: Select and print next task without executing it
+- `--once`: Run one iteration and exit (default if neither --once nor --loop specified)
+- `--loop`: Run continuously in a loop
+- `--sleep-seconds N`: Sleep duration between iterations in loop mode (default: 300)
 
 ## Monitoring
 

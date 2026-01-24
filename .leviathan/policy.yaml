@@ -1,0 +1,136 @@
+# Leviathan Self-Target Policy
+# Defines allowed paths, forbidden operations, and scope-based access control
+
+allowed_paths:
+  # Documentation scope - can modify docs and README
+  docs:
+    - "docs/**"
+    - "README.md"
+    - "*.md"
+  
+  # Test scope - can modify all test files
+  tests:
+    - "tests/**"
+    - "pytest.ini"
+    - ".pytest_cache/**"
+  
+  # Core scope - can modify leviathan package code
+  core:
+    - "leviathan/**/*.py"
+    - "leviathan/**/__init__.py"
+  
+  # Operations scope - can modify ops configs and deployment files
+  ops:
+    - "ops/**"
+    - "docker-compose.yml"
+    - "Dockerfile"
+    - "requirements.txt"
+    - ".dockerignore"
+    - ".gitignore"
+
+forbidden_paths:
+  # Never modify contract files (self-referential safety)
+  - ".leviathan/contract.yaml"
+  - ".leviathan/policy.yaml"
+  - ".leviathan/backlog.yaml"
+  
+  # Never modify git internals
+  - ".git/**"
+  - ".gitattributes"
+  
+  # Never create or modify secrets
+  - "**/*secret*.yaml"
+  - "**/*secret*.json"
+  - "**/*.key"
+  - "**/*.pem"
+  - "**/credentials*"
+  - "ops/k8s/secret.yaml"  # Only secret.template.yaml allowed
+  
+  # Never modify CI/CD without explicit task
+  - ".github/**"
+  
+  # Never modify database migrations directly (use migration tool)
+  - "leviathan/graph/migrations/*.sql"
+
+scope_constraints:
+  docs:
+    description: "Documentation and guides"
+    allowed_operations:
+      - create
+      - update
+      - delete
+    max_files_per_task: 10
+    requires_tests: false
+  
+  tests:
+    description: "Unit and integration tests"
+    allowed_operations:
+      - create
+      - update
+    max_files_per_task: 20
+    requires_tests: true  # New tests must pass
+  
+  core:
+    description: "Core leviathan package code"
+    allowed_operations:
+      - create
+      - update
+    max_files_per_task: 5
+    requires_tests: true
+    requires_documentation: true
+  
+  ops:
+    description: "Operational configs and deployment"
+    allowed_operations:
+      - create
+      - update
+    max_files_per_task: 5
+    requires_tests: false
+    requires_documentation: true
+
+safety_rules:
+  # Prevent infinite loops
+  max_attempts_per_task: 3
+  backoff_seconds: 60
+  
+  # Prevent runaway execution
+  max_concurrent_attempts: 1
+  max_tasks_per_day: 10
+  
+  # Code quality gates
+  require_passing_tests: true
+  require_lint_pass: true
+  
+  # PR requirements
+  require_pr_description: true
+  require_conventional_commit: true
+  
+  # Artifact limits
+  max_artifact_size_mb: 100
+  max_artifacts_per_attempt: 50
+
+file_size_limits:
+  # Prevent creating huge files
+  max_file_size_kb:
+    "*.py": 2000
+    "*.md": 500
+    "*.yaml": 100
+    "*.json": 500
+    "*.sql": 100
+
+code_style:
+  python:
+    max_line_length: 100
+    formatter: black
+    linter: ruff
+    type_checker: mypy
+  
+  yaml:
+    indent: 2
+    max_line_length: 120
+  
+  markdown:
+    max_line_length: 120
+    linter: markdownlint
+
+version: "0.1.0"

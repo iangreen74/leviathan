@@ -1,0 +1,169 @@
+# Leviathan Self-Target Backlog
+# Self-maintenance tasks for Leviathan to manage itself
+
+tasks:
+  - task_id: self-target-bootstrap
+    title: "Add documentation explaining self-target pattern"
+    description: |
+      Create comprehensive documentation explaining how Leviathan can manage itself
+      as a target. This includes:
+      - The self-target contract model
+      - How to register leviathan as a target in the graph
+      - Event flow for self-management
+      - Safety guarantees and constraints
+      - Example workflow: task selection -> attempt -> PR -> human merge
+    scope: docs
+    priority: high
+    estimated_size: small
+    ready: true
+    dependencies: []
+    allowed_paths:
+      - "docs/SELF_TARGET.md"
+      - "README.md"
+    acceptance_criteria:
+      - Documentation explains contract/policy/backlog structure
+      - Includes example of registering leviathan as target
+      - Describes safety model (PR-only, human approval)
+      - Shows event flow diagram
+      - Provides operator runbook for dual-target scheduling
+    labels:
+      - documentation
+      - self-management
+      - bootstrap
+
+  - task_id: self-scheduler-runbook
+    title: "Operator runbook for dual-target scheduling"
+    description: |
+      Create operational runbook for running scheduler against multiple targets
+      simultaneously (e.g., leviathan + radix). Covers:
+      - How to configure multiple targets
+      - Scheduler fairness and priority
+      - Monitoring multiple target graphs
+      - Troubleshooting common issues
+      - Resource limits and quotas
+    scope: docs
+    priority: high
+    estimated_size: small
+    ready: false
+    dependencies:
+      - self-target-bootstrap
+    allowed_paths:
+      - "docs/MULTI_TARGET_SCHEDULING.md"
+      - "docs/SCHEDULER.md"
+    acceptance_criteria:
+      - Documents multi-target scheduler configuration
+      - Includes monitoring commands for each target
+      - Provides troubleshooting guide
+      - Shows example scheduler invocations
+      - Explains task selection across targets
+    labels:
+      - documentation
+      - operations
+      - scheduling
+
+  - task_id: self-failure-budget
+    title: "Scheduler policy: block task after N failures in time window"
+    description: |
+      Implement failure budget policy in scheduler to prevent infinite retry loops.
+      After N failures within a time window, mark task as blocked and require
+      human intervention. Features:
+      - Configurable failure threshold (default: 3 failures)
+      - Configurable time window (default: 1 hour)
+      - Emit task.blocked event with failure summary
+      - Add unblock mechanism (manual or time-based)
+      - Update retry policy to respect failure budget
+    scope: core
+    priority: medium
+    estimated_size: medium
+    ready: false
+    dependencies:
+      - self-target-bootstrap
+      - self-scheduler-runbook
+    allowed_paths:
+      - "leviathan/control_plane/scheduler.py"
+      - "leviathan/control_plane/failure_budget.py"
+      - "tests/unit/test_failure_budget.py"
+    acceptance_criteria:
+      - FailureBudget class tracks failures per task
+      - Scheduler checks budget before creating attempt
+      - task.blocked event emitted when budget exceeded
+      - Unit tests cover budget enforcement
+      - Documentation updated in SCHEDULER.md
+    labels:
+      - core
+      - scheduler
+      - safety
+
+  - task_id: self-graph-ui-seed
+    title: "Minimal query CLI for graph inspection"
+    description: |
+      Add a simple CLI tool for querying the graph without running the full API.
+      Useful for local development and debugging. Commands:
+      - `leviathan graph show <node_id>` - show node details
+      - `leviathan graph list <node_type>` - list nodes by type
+      - `leviathan graph edges <node_id>` - show edges for node
+      - `leviathan graph events <node_id>` - show events for node
+      - `leviathan graph summary` - show graph statistics
+      Uses existing graph store, no new dependencies.
+    scope: core
+    priority: low
+    estimated_size: small
+    ready: false
+    dependencies:
+      - self-target-bootstrap
+    allowed_paths:
+      - "leviathan/cli/__init__.py"
+      - "leviathan/cli/graph.py"
+      - "tests/unit/test_cli_graph.py"
+      - "docs/CLI.md"
+    acceptance_criteria:
+      - CLI module with click or argparse
+      - All 5 commands implemented
+      - Works with ndjson and postgres backends
+      - Unit tests for each command
+      - Documentation with examples
+    labels:
+      - core
+      - cli
+      - tooling
+
+  - task_id: self-k8s-local-kind-runbook
+    title: "Exact local kind usage steps for K8s executor"
+    description: |
+      Enhance K8S_EXECUTOR.md with precise, copy-paste-ready commands for
+      local kind development. Should be executable line-by-line without errors.
+      Covers:
+      - kind cluster creation with specific config
+      - Building and loading worker image
+      - Creating namespace and secrets
+      - Port-forwarding control plane API
+      - Running scheduler with k8s executor
+      - Debugging failed jobs
+      - Cleaning up resources
+    scope: docs
+    priority: medium
+    estimated_size: small
+    ready: false
+    dependencies:
+      - self-target-bootstrap
+    allowed_paths:
+      - "docs/K8S_EXECUTOR.md"
+      - "ops/k8s/kind-config.yaml"
+    acceptance_criteria:
+      - All commands tested on fresh kind cluster
+      - No manual edits required (use envsubst or similar)
+      - Includes cleanup commands
+      - Troubleshooting section expanded
+      - Example output shown for key commands
+    labels:
+      - documentation
+      - operations
+      - kubernetes
+
+metadata:
+  version: "0.1.0"
+  created: "2026-01-24"
+  target: leviathan
+  total_tasks: 5
+  ready_tasks: 1
+  blocked_tasks: 0

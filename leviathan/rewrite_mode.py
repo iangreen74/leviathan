@@ -263,7 +263,8 @@ def read_existing_files(
 
 def create_rewrite_prompt(
     task,
-    existing_files: Dict[str, Optional[str]]
+    existing_files: Dict[str, Optional[str]],
+    retry_context: Optional[Dict[str, str]] = None
 ) -> str:
     """
     Create prompt for rewrite mode with filetype-aware instructions.
@@ -271,6 +272,7 @@ def create_rewrite_prompt(
     Args:
         task: Task object with id, title, scope, etc.
         existing_files: Dict of current file contents
+        retry_context: Optional dict with 'test_output' and 'failure_type' for retries
         
     Returns:
         Prompt string for model
@@ -327,6 +329,37 @@ YAML FILES (.yaml, .yml):
     
     filetype_section = "".join(filetype_instructions) if filetype_instructions else ""
     
+    # Build retry feedback section if this is a retry attempt
+    retry_section = ""
+    if retry_context:
+        failure_type = retry_context.get('failure_type', 'unknown')
+        test_output = retry_context.get('test_output', '')
+        
+        # Truncate test output to last 200 lines to keep prompt bounded
+        test_lines = test_output.split('\n')
+        if len(test_lines) > 200:
+            test_output = '\n'.join(test_lines[-200:])
+            test_output = f"[... truncated to last 200 lines ...]\n{test_output}"
+        
+        retry_section = f"""
+
+⚠️  RETRY ATTEMPT - PREVIOUS IMPLEMENTATION FAILED ⚠️
+
+Failure Type: {failure_type}
+
+The previous implementation failed with the following test output:
+
+```
+{test_output}
+```
+
+CURRENT FILE CONTENTS (after previous attempt):
+{chr(10).join(file_contexts)}
+
+Your task is to FIX the implementation based on the test failure above.
+Analyze the error carefully and generate corrected file contents.
+"""
+    
     prompt = f"""You are implementing a task from the Leviathan agent backlog.
 
 TASK DETAILS:
@@ -341,9 +374,10 @@ ALLOWED PATHS (you may ONLY modify these files):
 
 ACCEPTANCE CRITERIA (all must be satisfied):
 {chr(10).join(f'{i}. {criterion}' for i, criterion in enumerate(task.acceptance_criteria, 1))}
-
+{retry_section}
+{"" if retry_context else f'''
 CURRENT FILE CONTENTS:
-{chr(10).join(file_contexts)}
+{chr(10).join(file_contexts)}'''}
 
 HARD CONSTRAINTS:
 1. Only modify files within the allowed paths listed above

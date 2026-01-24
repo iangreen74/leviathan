@@ -5,7 +5,7 @@ Supports Claude API integration with fallback to local patch files.
 import os
 import re
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 import requests
 
 from leviathan.backlog import Task
@@ -338,7 +338,12 @@ Generate the implementation patch now:"""
         patch_file = self.artifacts_dir / 'last_patch.diff'
         patch_file.write_text(patch)
     
-    def generate_implementation_rewrite_mode(self, task: Task, max_retries: int = 1) -> Tuple[List[str], str]:
+    def generate_implementation_rewrite_mode(
+        self, 
+        task: Task, 
+        max_retries: int = 1,
+        retry_context: Optional[Dict[str, str]] = None
+    ) -> Tuple[List[str], str]:
         """
         Generate implementation using rewrite mode (for small tasks).
         
@@ -348,6 +353,7 @@ Generate the implementation patch now:"""
         Args:
             task: Task to implement
             max_retries: Number of retries on validation failure
+            retry_context: Optional dict with 'test_output' and 'failure_type' for repair loop
             
         Returns:
             Tuple of (written_paths, source)
@@ -370,11 +376,12 @@ Generate the implementation patch now:"""
                 # Create prompt
                 if attempt == 0:
                     print("🤖 Calling Claude API (rewrite mode) to generate implementation...")
-                    prompt = create_rewrite_prompt(task, existing_files)
+                    # Use retry_context if provided (for repair loop), otherwise fresh prompt
+                    prompt = create_rewrite_prompt(task, existing_files, retry_context=retry_context)
                 else:
                     print(f"🔄 Retry {attempt}/{max_retries} with stricter prompt...")
                     # Add extra emphasis on retry with specific error
-                    prompt = create_rewrite_prompt(task, existing_files)
+                    prompt = create_rewrite_prompt(task, existing_files, retry_context=retry_context)
                     prompt += f"\n\nIMPORTANT: Previous attempt failed validation with error:\n{last_error}\n\nPlease fix this error and output ONLY pure JSON with no extra text."
                 
                 # Call API

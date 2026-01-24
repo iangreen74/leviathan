@@ -45,6 +45,12 @@ LEVIATHAN_CLAUDE_MODEL=claude-3-5-sonnet-latest
 GITHUB_TOKEN=ghp_...
 ```
 
+**Important:** Systemd does NOT support shell parameter expansion syntax like `${VAR:-default}`. 
+If you need default values, either:
+- Use hardcoded values in the service file
+- Set the variable explicitly in `~/.leviathan/env`
+- Use `Environment=VAR=value` directive in the service file
+
 ### 4. Configure Target
 
 ```bash

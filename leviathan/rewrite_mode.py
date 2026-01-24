@@ -25,6 +25,82 @@ class RewriteModeError(Exception):
     pass
 
 
+def _extract_json_candidate(raw_output: str) -> Tuple[str, List[str]]:
+    """
+    Extract JSON candidate from raw output, handling markdown fences.
+    
+    Returns:
+        Tuple of (json_candidate, repairs_applied)
+        - json_candidate: Extracted JSON string
+        - repairs_applied: List of repair descriptions
+    """
+    repairs = []
+    
+    # Strip leading/trailing whitespace
+    output = raw_output.strip()
+    
+    # Check for markdown code fences
+    if '```' in output:
+        # Extract content between first ``` fence
+        fence_pattern = r'```(?:json)?\s*\n(.*?)\n```'
+        import re
+        match = re.search(fence_pattern, output, re.DOTALL)
+        if match:
+            output = match.group(1).strip()
+            repairs.append("stripped markdown code fence")
+        else:
+            # Try to extract between any ``` markers
+            parts = output.split('```')
+            if len(parts) >= 3:
+                # Take the content between first pair of ```
+                output = parts[1].strip()
+                # Remove language identifier if present
+                if output.startswith('json\n'):
+                    output = output[5:].strip()
+                repairs.append("stripped markdown code fence")
+    
+    # Extract from first '[' to last ']'
+    first_bracket = output.find('[')
+    last_bracket = output.rfind(']')
+    
+    if first_bracket != -1 and last_bracket != -1 and first_bracket < last_bracket:
+        output = output[first_bracket:last_bracket + 1]
+        if first_bracket > 0 or last_bracket < len(output) - 1:
+            repairs.append("extracted JSON array from surrounding text")
+    
+    return output, repairs
+
+
+def _repair_base64_whitespace(json_text: str) -> Tuple[str, int]:
+    """
+    Remove whitespace inside content_b64 values.
+    
+    This handles cases where base64 strings are wrapped across lines.
+    Only modifies content inside "content_b64" values, not paths or other fields.
+    
+    Returns:
+        Tuple of (repaired_json, chars_removed)
+    """
+    import re
+    
+    chars_removed = 0
+    
+    # Pattern to match "content_b64": "..." with non-greedy capture
+    # This ensures we only match the value, not spanning multiple objects
+    pattern = r'"content_b64"\s*:\s*"([^"]*)"'
+    
+    def remove_whitespace(match):
+        nonlocal chars_removed
+        original_value = match.group(1)
+        # Remove all whitespace characters (space, tab, newline, carriage return)
+        cleaned_value = re.sub(r'[\s\n\r\t]+', '', original_value)
+        chars_removed += len(original_value) - len(cleaned_value)
+        return f'"content_b64": "{cleaned_value}"'
+    
+    repaired = re.sub(pattern, remove_whitespace, json_text)
+    return repaired, chars_removed
+
+
 def validate_rewrite_output(
     output: str,
     allowed_paths: List[str],
@@ -32,11 +108,15 @@ def validate_rewrite_output(
     validate_content: bool = True
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, str]]]:
     """
-    Validate model output for rewrite mode.
+    Validate model output for rewrite mode with deterministic repair.
     
     Supports two formats:
     1. New format (preferred): JSON array of {"path": "...", "content_b64": "..."}
     2. Legacy format: JSON object {"path": "raw content"}
+    
+    Handles common LLM output issues:
+    - Markdown code fences around JSON
+    - Whitespace inside base64 strings
     
     Args:
         output: Raw model output (should be JSON)
@@ -50,11 +130,28 @@ def validate_rewrite_output(
         - error_message: Error description if validation failed
         - parsed_files: Dict mapping file paths to contents (if valid)
     """
-    # Try to parse JSON
+    # Step 1: Extract JSON candidate (handle fences, extract array)
+    json_candidate, extraction_repairs = _extract_json_candidate(output)
+    
+    # Step 2: Try to parse JSON
     try:
-        parsed = json.loads(output.strip())
+        parsed = json.loads(json_candidate)
     except json.JSONDecodeError as e:
-        return False, f"Invalid JSON: {str(e)}", None
+        # Step 3: Apply base64 whitespace repair and retry
+        repaired_json, chars_removed = _repair_base64_whitespace(json_candidate)
+        
+        if chars_removed > 0:
+            try:
+                parsed = json.loads(repaired_json)
+                print(f"🔧 rewrite_mode: repaired base64 whitespace; removed {chars_removed} chars")
+            except json.JSONDecodeError as e2:
+                return False, f"Invalid JSON even after repair: {str(e2)}", None
+        else:
+            return False, f"Invalid JSON: {str(e)}", None
+    
+    # Log extraction repairs if any were applied
+    if extraction_repairs:
+        print(f"🔧 rewrite_mode: applied repairs: {', '.join(extraction_repairs)}")
     
     # Check if it's the new array format
     if isinstance(parsed, list):

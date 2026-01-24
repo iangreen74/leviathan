@@ -1,0 +1,3 @@
+"""
+Content-addressed artifact storage.
+"""

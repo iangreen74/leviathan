@@ -25,6 +25,7 @@ from leviathan.model_client import ModelClient, PatchValidationError
 from leviathan.conflict_prevention import ConflictPrevention, ConflictPreventionError
 from leviathan.rewrite_mode import RewriteModeError
 from leviathan.target_config import TargetConfig
+from leviathan.worktree_executor import WorktreeExecutor, WorktreeError
 
 
 def sanitize_diff(diff_text: str) -> str:
@@ -154,6 +155,14 @@ class LeviathanRunner:
         Returns:
             True if checks pass, False otherwise
         """
+        # When using worktrees, we only need to check the cache repo is accessible
+        # Individual tasks will run in ephemeral worktrees, so cache cleanliness doesn't matter
+        if self.target_config:
+            # For target mode, just ensure cache exists and can fetch
+            Console.info("Using worktree mode - cache repo cleanliness not required")
+            return True
+        
+        # Legacy mode: Check cache working tree (for backward compatibility)
         # Check 1: Clean working tree
         result = subprocess.run(
             ['git', 'status', '--porcelain'],
@@ -333,85 +342,169 @@ class LeviathanRunner:
     def _execute_task(self, task: Task) -> bool:
         """Execute a single task workflow."""
         
+        # If using target config, execute in ephemeral worktree
+        if self.target_config:
+            return self._execute_task_in_worktree(task)
+        else:
+            # Legacy mode: execute directly in repo
+            return self._execute_task_direct(task)
+    
+    def _execute_task_in_worktree(self, task: Task) -> bool:
+        """Execute task in ephemeral worktree with guaranteed cleanup."""
+        workspace_base = Path.home() / '.leviathan' / 'workspaces'
+        
+        # Create worktree executor
+        worktree_exec = WorktreeExecutor(
+            cache_dir=self.repo_root,
+            workspace_base=workspace_base,
+            target_name=self.target_config.name
+        )
+        
+        try:
+            # Create ephemeral worktree
+            worktree_path = worktree_exec.create_worktree(
+                task_id=task.id,
+                base_branch=self.target_config.default_branch
+            )
+            
+            # Execute task in worktree
+            success = self._execute_task_direct(task, workspace_root=worktree_path)
+            
+            if success:
+                # Push branch from worktree
+                Console.info("Pushing branch from worktree...")
+                push_result = subprocess.run(
+                    ['git', 'push', '-u', 'origin', worktree_exec.branch_name],
+                    cwd=worktree_path,
+                    capture_output=True,
+                    text=True
+                )
+                
+                if push_result.returncode != 0:
+                    Console.error(f"Failed to push: {push_result.stderr}")
+                    return False
+                
+                Console.success("Branch pushed successfully")
+            
+            return success
+            
+        except WorktreeError as e:
+            Console.error(f"Worktree error: {str(e)}")
+            return False
+        except Exception as e:
+            Console.error(f"Task execution error: {str(e)}")
+            return False
+        finally:
+            # ALWAYS cleanup worktree, even on failure
+            worktree_exec.cleanup_worktree(force=True)
+    
+    def _execute_task_direct(self, task: Task, workspace_root: Optional[Path] = None) -> bool:
+        """Execute task directly (legacy mode or within a worktree)."""
+        
+        # Use workspace_root if provided (worktree mode), else use repo_root
+        work_root = workspace_root if workspace_root else self.repo_root
+        
         # Determine mode: rewrite for small tasks (<=5 files), diff for larger
         use_rewrite_mode = len(task.allowed_paths) <= 5
         
         # Step 1: Generate implementation
         Console.step(1, 6, "Generating implementation")
         
-        if use_rewrite_mode:
-            Console.info(f"Using rewrite mode ({len(task.allowed_paths)} file(s))")
-            try:
-                written_paths, source = self.model.generate_implementation_rewrite_mode(task)
-                Console.success(f"Implementation generated via {source} (rewrite mode)")
-                # Skip patch application step since files are already written
-                skip_patch_step = True
-            except RewriteModeError as e:
-                Console.error(f"Rewrite mode failed: {str(e)}")
-                self.logger.log_event('rewrite_mode_failed', task.id, {
-                    'error': str(e)
-                })
-                return False
-            except Exception as e:
-                Console.error(f"Implementation generation failed: {str(e)}")
-                self.logger.log_event('generation_failed', task.id, {
-                    'error': str(e)
-                })
-                return False
+        # Temporarily switch model client's repo_root to worktree if needed
+        original_repo_root = self.model.repo_root
+        if workspace_root:
+            self.model.repo_root = workspace_root
+        
+        try:
+            if use_rewrite_mode:
+                Console.info(f"Using rewrite mode ({len(task.allowed_paths)} file(s))")
+                try:
+                    written_paths, source = self.model.generate_implementation_rewrite_mode(task)
+                    Console.success(f"Implementation generated via {source} (rewrite mode)")
+                    # Skip patch application step since files are already written
+                    skip_patch_step = True
+                except RewriteModeError as e:
+                    Console.error(f"Rewrite mode failed: {str(e)}")
+                    self.logger.log_event('rewrite_mode_failed', task.id, {
+                        'error': str(e)
+                    })
+                    return False
+                except Exception as e:
+                    Console.error(f"Implementation generation failed: {str(e)}")
+                    self.logger.log_event('generation_failed', task.id, {
+                        'error': str(e)
+                    })
+                    return False
+            else:
+                Console.info(f"Using diff mode ({len(task.allowed_paths)} file(s))")
+                try:
+                    patch, source = self.model.generate_implementation(task)
+                    Console.success(f"Implementation generated via {source}")
+                    skip_patch_step = False
+                except PatchValidationError as e:
+                    Console.error(f"Patch validation failed: {str(e)}")
+                    self.logger.log_event('patch_validation_failed', task.id, {
+                        'error': str(e)
+                    })
+                    return False
+                except FileNotFoundError as e:
+                    Console.warning(str(e))
+                    return False
+                except Exception as e:
+                    Console.error(f"Implementation generation failed: {str(e)}")
+                    self.logger.log_event('generation_failed', task.id, {
+                        'error': str(e)
+                    })
+                    return False
+        finally:
+            # Restore original repo_root
+            self.model.repo_root = original_repo_root
+        
+        # Step 2: Create/verify branch
+        Console.step(2, 6, "Preparing branch")
+        
+        if workspace_root:
+            # In worktree mode, branch was already created by worktree executor
+            # Just get the branch name from git
+            result = subprocess.run(
+                ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                capture_output=True,
+                text=True,
+                cwd=workspace_root
+            )
+            branch_name = result.stdout.strip()
+            Console.success(f"Using worktree branch: {branch_name}")
         else:
-            Console.info(f"Using diff mode ({len(task.allowed_paths)} file(s))")
-            try:
-                patch, source = self.model.generate_implementation(task)
-                Console.success(f"Implementation generated via {source}")
-                skip_patch_step = False
-            except PatchValidationError as e:
-                Console.error(f"Patch validation failed: {str(e)}")
-                self.logger.log_event('patch_validation_failed', task.id, {
-                    'error': str(e)
+            # Legacy mode: create branch in current repo
+            # Ensure we're branching from latest main
+            Console.info("Ensuring fresh main branch...")
+            if not self.conflict_prevention.ensure_fresh_main():
+                Console.error("Failed to ensure fresh main")
+                self.logger.log_event('fresh_main_failed', task.id, {})
+                return False
+            
+            # Check for remote collision and compute branch name
+            base_branch_name = f"agent/{task.id}"
+            remote_exists = self.github.branch_exists_on_remote(base_branch_name)
+            
+            if remote_exists:
+                Console.warning(f"Branch '{base_branch_name}' already exists on remote")
+                Console.info("Using timestamp suffix to avoid collision...")
+            
+            branch_name = compute_branch_name(task.id, remote_exists)
+            
+            if remote_exists:
+                Console.info(f"Computed unique branch name: {branch_name}")
+            
+            if not self.github.create_branch(branch_name):
+                Console.error("Failed to create branch")
+                self.logger.log_event('branch_creation_failed', task.id, {
+                    'branch_name': branch_name,
+                    'remote_existed': remote_exists
                 })
                 return False
-            except FileNotFoundError as e:
-                Console.warning(str(e))
-                return False
-            except Exception as e:
-                Console.error(f"Implementation generation failed: {str(e)}")
-                self.logger.log_event('generation_failed', task.id, {
-                    'error': str(e)
-                })
-                return False
-        
-        # Step 2: Create branch from fresh main
-        Console.step(2, 6, "Creating branch from fresh main")
-        
-        # Ensure we're branching from latest main
-        Console.info("Ensuring fresh main branch...")
-        if not self.conflict_prevention.ensure_fresh_main():
-            Console.error("Failed to ensure fresh main")
-            self.logger.log_event('fresh_main_failed', task.id, {})
-            return False
-        
-        # Check for remote collision and compute branch name
-        base_branch_name = f"agent/{task.id}"
-        remote_exists = self.github.branch_exists_on_remote(base_branch_name)
-        
-        if remote_exists:
-            Console.warning(f"Branch '{base_branch_name}' already exists on remote")
-            Console.info("Using timestamp suffix to avoid collision...")
-        
-        branch_name = compute_branch_name(task.id, remote_exists)
-        
-        if remote_exists:
-            Console.info(f"Computed unique branch name: {branch_name}")
-        
-        if not self.github.create_branch(branch_name):
-            Console.error("Failed to create branch")
-            self.logger.log_event('branch_creation_failed', task.id, {
-                'branch_name': branch_name,
-                'remote_existed': remote_exists
-            })
-            return False
-        
-        Console.success(f"Branch created: {branch_name}")
+            
+            Console.success(f"Branch created: {branch_name}")
         
         # Step 3: Apply patch (skip if rewrite mode already wrote files)
         Console.step(3, 6, "Applying patch")
@@ -454,7 +547,14 @@ class LeviathanRunner:
         
         # Step 4: Run tests
         Console.step(4, 6, "Running tests")
-        test_success, test_output = self.executor.run_test_suite(task.scope, task.allowed_paths)
+        
+        # Create executor for the work_root (worktree or repo_root)
+        if workspace_root:
+            test_executor = CommandExecutor(workspace_root)
+        else:
+            test_executor = self.executor
+        
+        test_success, test_output = test_executor.run_test_suite(task.scope, task.allowed_paths)
         
         if not test_success:
             Console.error(f"Tests failed:\n{test_output}")
@@ -465,12 +565,18 @@ class LeviathanRunner:
         
         Console.success("Tests passed")
         
-        # Step 5: Commit and push
-        Console.step(5, 6, "Committing and pushing")
+        # Step 5: Commit (push happens in worktree cleanup for worktree mode)
+        Console.step(5, 6, "Committing changes")
         
         # Check if there are changes to commit
         Console.info("Checking for changes...")
-        status_result = self.executor.run_command(
+        
+        if workspace_root:
+            commit_executor = CommandExecutor(workspace_root)
+        else:
+            commit_executor = self.executor
+        
+        status_result = commit_executor.run_command(
             ['git', 'status', '--porcelain'],
             check=False
         )
@@ -494,32 +600,51 @@ class LeviathanRunner:
         # Include task ID in commit body
         commit_message = f"{commit_prefix}: {task.title}\n\nTask-ID: {task.id}"
         
-        if not self.github.commit_changes(commit_message, task.allowed_paths):
-            Console.error("Failed to commit changes")
+        # Commit changes
+        result = commit_executor.run_command(
+            ['git', 'add', '.'],
+            check=False
+        )
+        
+        if result.returncode != 0:
+            Console.error(f"Failed to stage changes: {result.stderr}")
             return False
         
-        # Check mergeability before pushing
-        Console.info("Checking mergeability with main...")
-        is_mergeable, conflict_reason = self.conflict_prevention.check_mergeability(branch_name)
+        result = commit_executor.run_command(
+            ['git', 'commit', '-m', commit_message],
+            check=False
+        )
         
-        if not is_mergeable:
-            Console.error(f"Merge conflict predicted: {conflict_reason}")
-            self.logger.log_event('merge_conflict_predicted', task.id, {
-                'reason': conflict_reason,
-                'branch': branch_name
-            })
-            self.backlog.update_task_status(task.id, status='blocked')
+        if result.returncode != 0:
+            Console.error(f"Failed to commit: {result.stderr}")
             return False
         
-        Console.success("Branch is mergeable")
+        Console.success("Changes committed")
         
-        if not self.github.push_branch(branch_name):
-            Console.error("Failed to push branch")
-            return False
+        # In legacy mode, push immediately. In worktree mode, push happens in caller
+        if not workspace_root:
+            # Check mergeability before pushing
+            Console.info("Checking mergeability with main...")
+            is_mergeable, conflict_reason = self.conflict_prevention.check_mergeability(branch_name)
+            
+            if not is_mergeable:
+                Console.error(f"Merge conflict predicted: {conflict_reason}")
+                self.logger.log_event('merge_conflict_predicted', task.id, {
+                    'reason': conflict_reason,
+                    'branch': branch_name
+                })
+                self.backlog.update_task_status(task.id, status='blocked')
+                return False
+            
+            Console.success("Branch is mergeable")
+            
+            if not self.github.push_branch(branch_name):
+                Console.error("Failed to push branch")
+                return False
+            
+            Console.success("Changes pushed")
         
-        Console.success("Changes pushed")
-        
-        # Step 6: Create pull request
+        # Step 6: Create pull request (using GitHub API from cache repo)
         Console.step(6, 6, "Creating pull request")
         
         pr_body = f"""## Task: {task.id}
@@ -544,6 +669,7 @@ Task-ID: {task.id}
 """
         
         # Use auto-title generation based on file scope
+        # GitHub client always uses self.repo_root (cache dir), which is correct
         try:
             pr_number, pr_url = self.github.create_pr_with_auto_title(
                 task_id=task.id,

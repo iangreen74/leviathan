@@ -364,6 +364,7 @@ Generate the implementation patch now:"""
         # Read existing files
         existing_files = read_existing_files(task.allowed_paths, self.repo_root)
         
+        last_error = None
         for attempt in range(max_retries + 1):
             try:
                 # Create prompt
@@ -372,9 +373,9 @@ Generate the implementation patch now:"""
                     prompt = create_rewrite_prompt(task, existing_files)
                 else:
                     print(f"🔄 Retry {attempt}/{max_retries} with stricter prompt...")
-                    # Add extra emphasis on retry
+                    # Add extra emphasis on retry with specific error
                     prompt = create_rewrite_prompt(task, existing_files)
-                    prompt += "\n\nIMPORTANT: Previous attempt failed validation. Output ONLY pure JSON with no extra text."
+                    prompt += f"\n\nIMPORTANT: Previous attempt failed validation with error:\n{last_error}\n\nPlease fix this error and output ONLY pure JSON with no extra text."
                 
                 # Call API
                 raw_output = self._call_claude_api(prompt)
@@ -383,16 +384,19 @@ Generate the implementation patch now:"""
                 output_file = self.artifacts_dir / 'last_rewrite_output.txt'
                 output_file.write_text(raw_output)
                 
-                # Validate output
+                # Validate output (includes content syntax validation)
                 is_valid, error_msg, parsed_files = validate_rewrite_output(
                     raw_output,
                     task.allowed_paths,
-                    self.repo_root
+                    self.repo_root,
+                    validate_content=True
                 )
                 
                 if not is_valid:
                     print(f"⚠️  Validation failed: {error_msg}")
                     if attempt < max_retries:
+                        # Store error for next retry prompt
+                        last_error = error_msg
                         continue
                     else:
                         raise RewriteModeError(

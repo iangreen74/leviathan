@@ -3,9 +3,12 @@ CLI entrypoint for scheduler.
 
 Usage:
     python -m leviathan.control_plane.scheduler --target radix --once
+    python -m leviathan.control_plane.scheduler --target leviathan --once
+    python -m leviathan.control_plane.scheduler --target /path/to/target.yaml --once
 """
 import argparse
 import sys
+import os
 import yaml
 from pathlib import Path
 
@@ -15,6 +18,69 @@ from leviathan.artifacts.store import ArtifactStore
 from leviathan.control_plane.scheduler import Scheduler, RetryPolicy
 from leviathan.executors.local_worktree import LocalWorktreeExecutor
 from leviathan.executors.k8s_stub import K8sExecutorStub
+
+
+def resolve_target_config(target_arg: str) -> dict:
+    """
+    Resolve target configuration from name or path.
+    
+    Args:
+        target_arg: Target name (e.g., 'leviathan') or path to YAML file
+        
+    Returns:
+        Target configuration dict
+        
+    Raises:
+        FileNotFoundError: If target file doesn't exist
+        ValueError: If target config is invalid
+    """
+    target_path = Path(target_arg)
+    
+    # Check if argument is an existing file path
+    if target_path.exists() and target_path.is_file():
+        config_file = target_path
+    else:
+        # Treat as target name, resolve to ~/.leviathan/targets/<name>.yaml
+        home = Path.home()
+        config_file = home / ".leviathan" / "targets" / f"{target_arg}.yaml"
+        
+        if not config_file.exists():
+            raise FileNotFoundError(
+                f"Target config not found: {config_file}\n\n"
+                f"To create a target config:\n"
+                f"  1. mkdir -p ~/.leviathan/targets\n"
+                f"  2. Create {config_file} with:\n"
+                f"     name: {target_arg}\n"
+                f"     repo_url: git@github.com:org/{target_arg}.git\n"
+                f"     default_branch: main\n"
+                f"     local_cache_dir: ~/.leviathan/targets/{target_arg}\n"
+            )
+    
+    # Load YAML config
+    with open(config_file, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    if not isinstance(config, dict):
+        raise ValueError(f"Invalid target config in {config_file}: must be a YAML dict")
+    
+    # Ensure required fields
+    if 'name' not in config:
+        config['name'] = target_arg
+    
+    # Expand local_cache_dir if present
+    if 'local_cache_dir' in config:
+        cache_dir = Path(config['local_cache_dir']).expanduser()
+        config['local_cache_dir'] = str(cache_dir)
+        
+        # Set paths to contract/backlog/policy relative to cache dir
+        if 'contract_path' not in config:
+            config['contract_path'] = str(cache_dir / ".leviathan" / "contract.yaml")
+        if 'backlog_path' not in config:
+            config['backlog_path'] = str(cache_dir / ".leviathan" / "backlog.yaml")
+        if 'policy_path' not in config:
+            config['policy_path'] = str(cache_dir / ".leviathan" / "policy.yaml")
+    
+    return config
 
 
 def main():
@@ -51,6 +117,18 @@ def main():
     
     args = parser.parse_args()
     
+    # Resolve target configuration
+    try:
+        target_config = resolve_target_config(args.target)
+    except FileNotFoundError as e:
+        print(f"❌ Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Error loading target config: {e}", file=sys.stderr)
+        sys.exit(1)
+    
+    target_id = target_config.get('name', args.target)
+    
     # Initialize stores
     if args.backend == "postgres":
         postgres_url = "postgresql://leviathan:leviathan_dev_password@localhost:5432/leviathan"
@@ -80,24 +158,18 @@ def main():
         retry_policy=retry_policy
     )
     
-    # Target configuration (simplified for now)
-    target_config = {
-        'target_id': args.target,
-        'name': args.target,
-        'repo_url': f'git@github.com:iangreen74/{args.target}.git',
-        'default_branch': 'main'
-    }
-    
     print(f"Leviathan Scheduler")
-    print(f"Target: {args.target}")
+    print(f"Target: {target_id}")
     print(f"Backend: {args.backend}")
     print(f"Executor: {args.executor}")
     print(f"Max attempts: {args.max_attempts}")
+    if 'backlog_path' in target_config:
+        print(f"Backlog: {target_config['backlog_path']}")
     print()
     
     if args.once:
         # Run once and exit
-        executed = scheduler.run_once(args.target, target_config)
+        executed = scheduler.run_once(target_id, target_config)
         
         if executed:
             print("\n✅ Scheduler run completed")

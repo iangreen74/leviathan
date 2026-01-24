@@ -4,15 +4,20 @@ Rewrite mode for Leviathan - reliable file writing for small tasks.
 Instead of generating diffs (which often fail), this mode:
 1. Prompts model to return strict JSON array with base64-encoded file contents
 2. Validates JSON structure and path constraints
-3. Writes files directly
+3. Validates file content syntax (Python, JSON, YAML)
+4. Writes files atomically
 
 This is more reliable for small tasks (<=5 files).
 Base64 encoding prevents JSON parsing failures from special characters in file contents.
 """
 import json
 import base64
+import os
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
+
+from leviathan.content_validation import validate_file_content, ContentValidationError
 
 
 class RewriteModeError(Exception):
@@ -23,7 +28,8 @@ class RewriteModeError(Exception):
 def validate_rewrite_output(
     output: str,
     allowed_paths: List[str],
-    repo_root: Path
+    repo_root: Path,
+    validate_content: bool = True
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, str]]]:
     """
     Validate model output for rewrite mode.
@@ -36,6 +42,7 @@ def validate_rewrite_output(
         output: Raw model output (should be JSON)
         allowed_paths: List of allowed file paths
         repo_root: Repository root path
+        validate_content: If True, validate file syntax (Python, JSON, YAML)
         
     Returns:
         Tuple of (is_valid, error_message, parsed_files)
@@ -51,15 +58,26 @@ def validate_rewrite_output(
     
     # Check if it's the new array format
     if isinstance(parsed, list):
-        return _validate_array_format(parsed, allowed_paths)
-    
+        is_valid, error_msg, files = _validate_array_format(parsed, allowed_paths)
     # Check if it's the legacy dict format
     elif isinstance(parsed, dict):
         print("⚠️  Using legacy dict format (consider upgrading to base64 array format)")
-        return _validate_dict_format(parsed, allowed_paths)
-    
+        is_valid, error_msg, files = _validate_dict_format(parsed, allowed_paths)
     else:
         return False, f"Expected JSON array or object, got {type(parsed).__name__}", None
+    
+    # If structure validation failed, return early
+    if not is_valid:
+        return is_valid, error_msg, files
+    
+    # Validate file contents if requested
+    if validate_content and files:
+        for file_path, content in files.items():
+            content_valid, content_error = validate_file_content(file_path, content)
+            if not content_valid:
+                return False, content_error, None
+    
+    return is_valid, error_msg, files
 
 
 def _validate_array_format(
@@ -162,7 +180,7 @@ def write_files(
     ensure_trailing_newline: bool = True
 ) -> List[str]:
     """
-    Write files to disk.
+    Write files to disk atomically using temp files.
     
     Args:
         files: Dict mapping file paths to contents
@@ -184,9 +202,29 @@ def write_files(
         if ensure_trailing_newline and content and not content.endswith('\n'):
             content += '\n'
         
-        # Write file
-        full_path.write_text(content, encoding='utf-8')
-        written_paths.append(file_path)
+        # Write atomically: write to temp file in same directory, then replace
+        # This ensures we never have partially-written files
+        temp_fd, temp_path = tempfile.mkstemp(
+            dir=full_path.parent,
+            prefix=f".{full_path.name}.",
+            suffix=".tmp"
+        )
+        
+        try:
+            # Write content to temp file
+            with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            # Atomically replace target file
+            os.replace(temp_path, full_path)
+            written_paths.append(file_path)
+        except Exception:
+            # Clean up temp file on error
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
+            raise
     
     return written_paths
 

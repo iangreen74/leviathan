@@ -2,7 +2,7 @@
 # Self-maintenance tasks for Leviathan to manage itself
 
 tasks:
-  - task_id: self-target-bootstrap
+  - id: self-target-bootstrap
     title: "Add documentation explaining self-target pattern"
     description: |
       Create comprehensive documentation explaining how Leviathan can manage itself
@@ -31,7 +31,7 @@ tasks:
       - self-management
       - bootstrap
 
-  - task_id: self-scheduler-runbook
+  - id: self-scheduler-runbook
     title: "Operator runbook for dual-target scheduling"
     description: |
       Create operational runbook for running scheduler against multiple targets
@@ -61,7 +61,7 @@ tasks:
       - operations
       - scheduling
 
-  - task_id: self-failure-budget
+  - id: self-failure-budget
     title: "Scheduler policy: block task after N failures in time window"
     description: |
       Implement failure budget policy in scheduler to prevent infinite retry loops.
@@ -94,7 +94,7 @@ tasks:
       - scheduler
       - safety
 
-  - task_id: self-graph-ui-seed
+  - id: self-graph-ui-seed
     title: "Minimal query CLI for graph inspection"
     description: |
       Add a simple CLI tool for querying the graph without running the full API.
@@ -127,7 +127,7 @@ tasks:
       - cli
       - tooling
 
-  - task_id: self-k8s-local-kind-runbook
+  - id: self-k8s-local-kind-runbook
     title: "Exact local kind usage steps for K8s executor"
     description: |
       Enhance K8S_EXECUTOR.md with precise, copy-paste-ready commands for

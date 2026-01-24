@@ -156,7 +156,7 @@ def apply_refill_via_pr(repo_root: Path, backlog_path: Path, modified_backlog: D
     
     # Create PR using gh CLI or GitHub API
     try:
-        from tools.leviathan.github import GitHubClient
+        from leviathan.github import GitHubClient
         github = GitHubClient(repo_root)
         
         pr_title = f"chore(backlog): auto-refill ready tasks ({len(changes)} tasks)"

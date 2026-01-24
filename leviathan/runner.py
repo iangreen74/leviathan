@@ -17,13 +17,13 @@ import subprocess
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tools.leviathan.backlog import Backlog, Task
-from tools.leviathan.console import Console
-from tools.leviathan.github import GitHubClient, compute_branch_name
-from tools.leviathan.exec import CommandExecutor
-from tools.leviathan.model_client import ModelClient, PatchValidationError
-from tools.leviathan.conflict_prevention import ConflictPrevention, ConflictPreventionError
-from tools.leviathan.rewrite_mode import RewriteModeError
+from leviathan.backlog import Backlog, Task
+from leviathan.console import Console
+from leviathan.github import GitHubClient, compute_branch_name
+from leviathan.exec import CommandExecutor
+from leviathan.model_client import ModelClient, PatchValidationError
+from leviathan.conflict_prevention import ConflictPrevention, ConflictPreventionError
+from leviathan.rewrite_mode import RewriteModeError
 
 
 def sanitize_diff(diff_text: str) -> str:
@@ -132,7 +132,7 @@ class LeviathanRunner:
         
         # Initialize state tracking
         try:
-            from tools.leviathan.state import LeviathanState
+            from leviathan.state import LeviathanState
             self.state = LeviathanState()
         except Exception:
             self.state = None

@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Optional, Tuple, List
 import requests
 
-from tools.leviathan.backlog import Task
-from tools.leviathan.rewrite_mode import (
+from leviathan.backlog import Task
+from leviathan.rewrite_mode import (
     create_rewrite_prompt,
     read_existing_files,
     validate_rewrite_output,

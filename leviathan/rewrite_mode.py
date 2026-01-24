@@ -266,7 +266,7 @@ def create_rewrite_prompt(
     existing_files: Dict[str, Optional[str]]
 ) -> str:
     """
-    Create prompt for rewrite mode.
+    Create prompt for rewrite mode with filetype-aware instructions.
     
     Args:
         task: Task object with id, title, scope, etc.
@@ -275,6 +275,11 @@ def create_rewrite_prompt(
     Returns:
         Prompt string for model
     """
+    # Analyze file types in allowed paths
+    has_python = any(path.endswith('.py') for path in task.allowed_paths)
+    has_json = any(path.endswith('.json') for path in task.allowed_paths)
+    has_yaml = any(path.endswith(('.yaml', '.yml')) for path in task.allowed_paths)
+    
     # Build file context section
     file_contexts = []
     for file_path, content in existing_files.items():
@@ -287,6 +292,40 @@ def create_rewrite_prompt(
             file_contexts.append(f"""=== FILE: {file_path} (current content) ===
 {content}=== END FILE ===
 """)
+    
+    # Build filetype-specific instructions
+    filetype_instructions = []
+    
+    if has_python:
+        filetype_instructions.append("""
+PYTHON FILES (.py):
+- MUST decode to valid Python 3.10+ source code
+- NO JSON-like escaped fragments (no literal \\n, \\t outside Python strings)
+- Use Python dict/list literals directly: {{"key": "value"}}, not {{\\"key\\": \\"value\\"}}
+- If you need JSON data in Python, use triple-quoted strings with json.loads():
+  
+  import json
+  data = json.loads('''
+  {{
+      "key": "value"
+  }}
+  ''')
+  
+- Write idiomatic Python, not JSON masquerading as Python""")
+    
+    if has_json:
+        filetype_instructions.append("""
+JSON FILES (.json):
+- MUST decode to valid JSON (strict RFC 8259)
+- Use proper JSON syntax with escaped quotes inside strings""")
+    
+    if has_yaml:
+        filetype_instructions.append("""
+YAML FILES (.yaml, .yml):
+- MUST decode to valid YAML
+- Use proper YAML indentation and syntax""")
+    
+    filetype_section = "".join(filetype_instructions) if filetype_instructions else ""
     
     prompt = f"""You are implementing a task from the Leviathan agent backlog.
 
@@ -312,6 +351,7 @@ HARD CONSTRAINTS:
 3. Follow the scope constraints ({task.scope})
 4. Write clean, tested, documented code
 5. Ensure all acceptance criteria are met
+{filetype_section}
 
 OUTPUT FORMAT - CRITICAL:
 You MUST output ONLY a JSON array where each element has:
@@ -325,10 +365,10 @@ RULES:
 - Include ALL files that need to be written (even if only slightly modified)
 - Use base64 encoding to avoid JSON escaping issues
 
-Example (output ONLY this format, nothing else):
+Example showing Python test file with dict literal (NOT escaped JSON):
 [
-  {{"path": "path/to/file1.py", "content_b64": "aW1wb3J0IG9zCgpkZWYgbWFpbigpOgogICAgcGFzcwo="}},
-  {{"path": "path/to/file2.json", "content_b64": "eyJrZXkiOiAidmFsdWUifQo="}}
+  {{"path": "tests/unit/test_example.py", "content_b64": "aW1wb3J0IHB5dGVzdAoKZGVmIHRlc3RfZXhhbXBsZSgpOgogICAgZGF0YSA9IHsKICAgICAgICAibmFtZSI6ICJ0ZXN0IiwKICAgICAgICAidmFsdWUiOiA0MgogICAgfQogICAgYXNzZXJ0IGRhdGFbIm5hbWUiXSA9PSAidGVzdCIK"}},
+  {{"path": "config.json", "content_b64": "ewogICAgImtleSI6ICJ2YWx1ZSIKfQo="}}
 ]
 
 Generate the implementation now as pure JSON array with base64-encoded contents:"""

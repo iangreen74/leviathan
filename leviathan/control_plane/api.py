@@ -79,6 +79,30 @@ class AttemptResponse(BaseModel):
     artifacts: List[Dict[str, Any]]
 
 
+class AttemptsListResponse(BaseModel):
+    """List of attempts response."""
+    attempts: List[Dict[str, Any]]
+    count: int
+
+
+class FailuresListResponse(BaseModel):
+    """List of failures response."""
+    failures: List[Dict[str, Any]]
+    count: int
+
+
+class InvalidateRequest(BaseModel):
+    """Request to invalidate an attempt."""
+    reason: str
+
+
+class InvalidateResponse(BaseModel):
+    """Response for invalidation."""
+    attempt_id: str
+    invalidated: bool
+    reason: str
+
+
 # Global state (initialized on startup)
 config: Optional[ControlPlaneConfig] = None
 event_store: Optional[EventStore] = None
@@ -261,6 +285,59 @@ async def graph_summary(token: str = Depends(verify_token)):
     )
 
 
+@app.get("/v1/attempts", response_model=AttemptsListResponse)
+async def list_attempts(
+    target: Optional[str] = None,
+    limit: int = 10,
+    token: str = Depends(verify_token)
+):
+    """
+    List recent attempts, optionally filtered by target.
+    
+    Args:
+        target: Optional target name filter
+        limit: Maximum number of attempts to return
+        token: Verified bearer token
+        
+    Returns:
+        List of attempts
+    """
+    if not graph_store:
+        raise HTTPException(status_code=500, detail="Stores not initialized")
+    
+    # Query attempt nodes
+    attempt_nodes = graph_store.query_nodes(node_type=NodeType.ATTEMPT)
+    
+    # Filter by target if specified
+    if target:
+        attempt_nodes = [n for n in attempt_nodes if n.get('properties', {}).get('target') == target]
+    
+    # Sort by timestamp (most recent first)
+    attempt_nodes.sort(
+        key=lambda n: n.get('properties', {}).get('timestamp', ''),
+        reverse=True
+    )
+    
+    # Limit results
+    attempt_nodes = attempt_nodes[:limit]
+    
+    # Format response
+    attempts = []
+    for node in attempt_nodes:
+        props = node.get('properties', {})
+        attempts.append({
+            'attempt_id': node.get('node_id'),
+            'task_id': props.get('task_id'),
+            'target': props.get('target'),
+            'status': props.get('status'),
+            'timestamp': props.get('timestamp'),
+            'pr_url': props.get('pr_url'),
+            'pr_number': props.get('pr_number')
+        })
+    
+    return AttemptsListResponse(attempts=attempts, count=len(attempts))
+
+
 @app.get("/v1/attempts/{attempt_id}", response_model=AttemptResponse)
 async def get_attempt(
     attempt_id: str,
@@ -308,6 +385,117 @@ async def get_attempt(
         attempt_node=attempt_node,
         events=related_events,
         artifacts=artifacts
+    )
+
+
+@app.get("/v1/failures", response_model=FailuresListResponse)
+async def list_failures(
+    target: Optional[str] = None,
+    limit: int = 10,
+    token: str = Depends(verify_token)
+):
+    """
+    List recent failures, optionally filtered by target.
+    
+    Args:
+        target: Optional target name filter
+        limit: Maximum number of failures to return
+        token: Verified bearer token
+        
+    Returns:
+        List of failures
+    """
+    if not event_store:
+        raise HTTPException(status_code=500, detail="Stores not initialized")
+    
+    # Get all events and filter for failures
+    all_events = event_store.get_events()
+    failure_events = [
+        e for e in all_events
+        if e.event_type in ['attempt.failed', 'task.failed']
+    ]
+    
+    # Filter by target if specified
+    if target:
+        failure_events = [
+            e for e in failure_events
+            if e.payload.get('target') == target or e.payload.get('target_id') == target
+        ]
+    
+    # Sort by timestamp (most recent first)
+    failure_events.sort(key=lambda e: e.timestamp, reverse=True)
+    
+    # Limit results
+    failure_events = failure_events[:limit]
+    
+    # Format response
+    failures = []
+    for event in failure_events:
+        failures.append({
+            'attempt_id': event.payload.get('attempt_id'),
+            'task_id': event.payload.get('task_id'),
+            'target': event.payload.get('target') or event.payload.get('target_id'),
+            'error': event.payload.get('error') or event.payload.get('reason'),
+            'timestamp': event.timestamp.isoformat()
+        })
+    
+    return FailuresListResponse(failures=failures, count=len(failures))
+
+
+@app.post("/v1/attempts/{attempt_id}/invalidate", response_model=InvalidateResponse)
+async def invalidate_attempt(
+    attempt_id: str,
+    request: InvalidateRequest,
+    token: str = Depends(verify_token)
+):
+    """
+    Invalidate an attempt (mark as invalid for retry).
+    
+    Args:
+        attempt_id: Attempt identifier
+        request: Invalidation request with reason
+        token: Verified bearer token
+        
+    Returns:
+        Invalidation confirmation
+    """
+    if not graph_store or not event_store:
+        raise HTTPException(status_code=500, detail="Stores not initialized")
+    
+    # Check if attempt exists
+    attempt_node = graph_store.get_node(attempt_id)
+    if not attempt_node:
+        raise HTTPException(status_code=404, detail=f"Attempt {attempt_id} not found")
+    
+    # Update attempt node status
+    props = attempt_node.get('properties', {})
+    props['status'] = 'invalidated'
+    props['invalidation_reason'] = request.reason
+    props['invalidated_at'] = datetime.utcnow().isoformat()
+    
+    graph_store.add_node(
+        node_id=attempt_id,
+        node_type=NodeType.ATTEMPT,
+        properties=props
+    )
+    
+    # Create invalidation event
+    invalidation_event = Event(
+        event_id=f"invalidation-{attempt_id}-{datetime.utcnow().timestamp()}",
+        timestamp=datetime.utcnow(),
+        event_type='attempt.invalidated',
+        actor_id='operator',
+        payload={
+            'attempt_id': attempt_id,
+            'reason': request.reason
+        }
+    )
+    event_store.append(invalidation_event)
+    
+    return InvalidateResponse(
+        attempt_id=attempt_id,
+        invalidated=True,
+        reason=request.reason
     )
 
 

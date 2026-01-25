@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: leviathan-control-plane
+  namespace: leviathan
+spec:
+  selector:
+    app: leviathan-control-plane
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: leviathan-control-plane
+  namespace: leviathan
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: leviathan-control-plane
+  template:
+    metadata:
+      labels:
+        app: leviathan-control-plane
+    spec:
+      containers:
+        - name: api
+          image: leviathan-worker:local
+          command: ["python", "-m", "leviathan.control_plane.api"]
+          env:
+            - name: LEVIATHAN_CONTROL_PLANE_BACKEND
+              value: ndjson
+          envFrom:
+            - secretRef:
+                name: leviathan-secrets
+          ports:
+            - containerPort: 8000

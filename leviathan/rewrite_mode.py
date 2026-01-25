@@ -59,14 +59,24 @@ def _extract_json_candidate(raw_output: str) -> Tuple[str, List[str]]:
                     output = output[5:].strip()
                 repairs.append("stripped markdown code fence")
     
-    # Extract from first '[' to last ']'
-    first_bracket = output.find('[')
-    last_bracket = output.rfind(']')
-    
-    if first_bracket != -1 and last_bracket != -1 and first_bracket < last_bracket:
-        output = output[first_bracket:last_bracket + 1]
-        if first_bracket > 0 or last_bracket < len(output) - 1:
-            repairs.append("extracted JSON array from surrounding text")
+    # Try to extract strict envelope format first: {"files":[...]}
+    if '{"files"' in output or '{\"files\"' in output:
+        import re
+        # Look for {"files":[...]} pattern
+        match = re.search(r'\{\s*"files"\s*:\s*\[(.*?)\]\s*\}', output, re.DOTALL)
+        if match:
+            # Extract just the array part
+            output = '[' + match.group(1) + ']'
+            repairs.append("extracted files array from envelope")
+    else:
+        # Extract from first '[' or '{' to last ']' or '}'
+        first_bracket = output.find('[')
+        last_bracket = output.rfind(']')
+        
+        if first_bracket != -1 and last_bracket != -1 and first_bracket < last_bracket:
+            output = output[first_bracket:last_bracket + 1]
+            if first_bracket > 0 or last_bracket < len(output) - 1:
+                repairs.append("extracted JSON array from surrounding text")
     
     return output, repairs
 
@@ -101,6 +111,44 @@ def _repair_base64_whitespace(json_text: str) -> Tuple[str, int]:
     return repaired, chars_removed
 
 
+def _salvage_partial_json(raw_text: str) -> Tuple[Optional[list], int]:
+    """
+    Salvage complete file entries from malformed/truncated JSON.
+    
+    Scans for complete {"path": "...", "content_b64": "..."} pairs.
+    Ignores partial/truncated entries at the end.
+    
+    Args:
+        raw_text: Raw JSON text that failed to parse
+        
+    Returns:
+        Tuple of (salvaged_list, num_salvaged)
+        - salvaged_list: List of complete file objects, or None if salvage failed
+        - num_salvaged: Number of complete entries salvaged
+    """
+    import re
+    
+    # Pattern to match complete file entries with both path and content_b64
+    # Must have closing quotes for both fields
+    pattern = r'\{\s*"path"\s*:\s*"([^"]+)"\s*,\s*"content_b64"\s*:\s*"([^"]+)"\s*\}'
+    
+    matches = re.findall(pattern, raw_text, re.DOTALL)
+    
+    if not matches:
+        return None, 0
+    
+    salvaged = []
+    for path, content_b64 in matches:
+        # Remove whitespace from content_b64 (common issue)
+        content_b64_clean = re.sub(r'[\s\n\r\t]+', '', content_b64)
+        salvaged.append({
+            "path": path,
+            "content_b64": content_b64_clean
+        })
+    
+    return salvaged, len(salvaged)
+
+
 def validate_rewrite_output(
     output: str,
     allowed_paths: List[str],
@@ -108,15 +156,17 @@ def validate_rewrite_output(
     validate_content: bool = True
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, str]]]:
     """
-    Validate model output for rewrite mode with deterministic repair.
+    Validate model output for rewrite mode with deterministic repair and salvage.
     
     Supports two formats:
     1. New format (preferred): JSON array of {"path": "...", "content_b64": "..."}
-    2. Legacy format: JSON object {"path": "raw content"}
+    2. Envelope format: {"files": [{"path": "...", "content_b64": "..."}]}
+    3. Legacy format: JSON object {"path": "raw content"}
     
     Handles common LLM output issues:
     - Markdown code fences around JSON
     - Whitespace inside base64 strings
+    - Truncated/malformed JSON (salvages complete entries)
     
     Args:
         output: Raw model output (should be JSON)
@@ -134,6 +184,9 @@ def validate_rewrite_output(
     json_candidate, extraction_repairs = _extract_json_candidate(output)
     
     # Step 2: Try to parse JSON
+    parsed = None
+    salvaged = False
+    
     try:
         parsed = json.loads(json_candidate)
     except json.JSONDecodeError as e:
@@ -145,9 +198,23 @@ def validate_rewrite_output(
                 parsed = json.loads(repaired_json)
                 print(f"🔧 rewrite_mode: repaired base64 whitespace; removed {chars_removed} chars")
             except json.JSONDecodeError as e2:
-                return False, f"Invalid JSON even after repair: {str(e2)}", None
+                # Step 4: Attempt salvage of complete entries
+                salvaged_list, num_salvaged = _salvage_partial_json(repaired_json)
+                if salvaged_list and num_salvaged > 0:
+                    parsed = salvaged_list
+                    salvaged = True
+                    print(f"🔧 rewrite_mode: salvaged {num_salvaged} complete file entries from malformed JSON")
+                else:
+                    return False, f"Invalid JSON and salvage failed: {str(e2)}", None
         else:
-            return False, f"Invalid JSON: {str(e)}", None
+            # Try salvage without whitespace repair
+            salvaged_list, num_salvaged = _salvage_partial_json(json_candidate)
+            if salvaged_list and num_salvaged > 0:
+                parsed = salvaged_list
+                salvaged = True
+                print(f"🔧 rewrite_mode: salvaged {num_salvaged} complete file entries from malformed JSON")
+            else:
+                return False, f"Invalid JSON and salvage failed: {str(e)}", None
     
     # Log extraction repairs if any were applied
     if extraction_repairs:
@@ -167,6 +234,12 @@ def validate_rewrite_output(
     if not is_valid:
         return is_valid, error_msg, files
     
+    # Step 5: Enforce allowed_paths completeness (all must be present exactly once)
+    if files:
+        is_complete, completeness_error = _validate_path_completeness(files, allowed_paths)
+        if not is_complete:
+            return False, completeness_error, None
+    
     # Validate file contents if requested
     if validate_content and files:
         for file_path, content in files.items():
@@ -175,6 +248,38 @@ def validate_rewrite_output(
                 return False, content_error, None
     
     return is_valid, error_msg, files
+
+
+def _validate_path_completeness(
+    files: Dict[str, str],
+    allowed_paths: List[str]
+) -> Tuple[bool, Optional[str]]:
+    """
+    Validate that all allowed_paths are present exactly once.
+    
+    Args:
+        files: Dict of parsed files
+        allowed_paths: List of required paths
+        
+    Returns:
+        Tuple of (is_complete, error_message)
+    """
+    file_paths = set(files.keys())
+    allowed_set = set(allowed_paths)
+    
+    # Check for extra paths first (not in allowed_paths) - security check
+    extra = file_paths - allowed_set
+    if extra:
+        extra_list = sorted(extra)
+        return False, f"Extra paths not in allowed_paths: {', '.join(extra_list)}"
+    
+    # Check for missing paths
+    missing = allowed_set - file_paths
+    if missing:
+        missing_list = sorted(missing)
+        return False, f"Missing required paths: {', '.join(missing_list)}"
+    
+    return True, None
 
 
 def _validate_array_format(
@@ -218,15 +323,9 @@ def _validate_array_format(
         except Exception as e:
             return False, f"Item {i} ({path}): base64 decode failed: {str(e)}", None
         
-        # Check path is allowed
-        allowed = False
-        for allowed_path in allowed_paths:
-            if path == allowed_path or path.startswith(allowed_path.rstrip('/') + '/'):
-                allowed = True
-                break
-        
-        if not allowed:
-            return False, f"Path not in allowed_paths: {path}", None
+        # Check for duplicate paths
+        if path in files:
+            return False, f"Duplicate path: {path}", None
         
         files[path] = content
     
@@ -485,23 +584,25 @@ HARD CONSTRAINTS:
 {filetype_section}
 
 OUTPUT FORMAT - CRITICAL:
-You MUST output ONLY a JSON array where each element has:
-- "path": file path (must be from allowed_paths above)
-- "content_b64": base64-encoded COMPLETE file contents
+You MUST output EXACTLY this format with NO extra text:
+
+{{"files":[{{"path":"...","content_b64":"..."}},{{"path":"...","content_b64":"..."}}]}}
 
 RULES:
-- NO markdown code fences (no ```)
-- NO explanatory text before or after the JSON
-- NO comments
-- Include ALL files that need to be written (even if only slightly modified)
-- Use base64 encoding to avoid JSON escaping issues
+1. EXACT envelope: {{"files":[...]}}
+2. NO markdown code fences (no ```)
+3. NO explanatory text before or after
+4. NO comments or prose
+5. Include ALL files from allowed_paths (even if only slightly modified)
+6. Use base64 encoding to avoid JSON escaping issues
+7. Each file object MUST have both "path" and "content_b64" fields
 
-Example showing Python test file with dict literal (NOT escaped JSON):
-[
-  {{"path": "tests/unit/test_example.py", "content_b64": "aW1wb3J0IHB5dGVzdAoKZGVmIHRlc3RfZXhhbXBsZSgpOgogICAgZGF0YSA9IHsKICAgICAgICAibmFtZSI6ICJ0ZXN0IiwKICAgICAgICAidmFsdWUiOiA0MgogICAgfQogICAgYXNzZXJ0IGRhdGFbIm5hbWUiXSA9PSAidGVzdCIK"}},
-  {{"path": "config.json", "content_b64": "ewogICAgImtleSI6ICJ2YWx1ZSIKfQo="}}
-]
+Example (Python test with dict literal, NOT escaped JSON):
+{{"files":[
+  {{"path":"tests/unit/test_example.py","content_b64":"aW1wb3J0IHB5dGVzdAoKZGVmIHRlc3RfZXhhbXBsZSgpOgogICAgZGF0YSA9IHsKICAgICAgICAibmFtZSI6ICJ0ZXN0IiwKICAgICAgICAidmFsdWUiOiA0MgogICAgfQogICAgYXNzZXJ0IGRhdGFbIm5hbWUiXSA9PSAidGVzdCIK"}},
+  {{"path":"config.json","content_b64":"ewogICAgImtleSI6ICJ2YWx1ZSIKfQo="}}
+]}}
 
-Generate the implementation now as pure JSON array with base64-encoded contents:"""
+Generate the implementation now as pure JSON envelope with base64-encoded contents:"""
     
     return prompt

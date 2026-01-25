@@ -17,12 +17,35 @@ The K8s executor submits ephemeral Jobs to a Kubernetes cluster. Each Job:
 
 **Success requires a real PR**: The worker must successfully create a GitHub PR with a valid PR number and URL. Placeholder PRs are not accepted.
 
+## Container Images
+
+Pre-built images are available on GitHub Container Registry:
+
+```bash
+# Worker image (executes tasks in Kubernetes Jobs)
+ghcr.io/iangreen74/leviathan-worker:latest
+ghcr.io/iangreen74/leviathan-worker:<sha>
+ghcr.io/iangreen74/leviathan-worker:v1.0.0
+
+# Control plane image (API server)
+ghcr.io/iangreen74/leviathan-control-plane:latest
+ghcr.io/iangreen74/leviathan-control-plane:<sha>
+ghcr.io/iangreen74/leviathan-control-plane:v1.0.0
+```
+
+**Image tags:**
+- `:latest` - Latest release from main branch
+- `:v*` - Specific version tag (e.g., v1.0.0)
+- `:<sha>` - Specific commit SHA (7 chars)
+
+Images are automatically built and published via GitHub Actions on every push to main and on version tags.
+
 ## Prerequisites
 
 - Kubernetes cluster (kind, minikube, or production cluster)
-- Docker for building worker image
 - kubectl configured
 - Control plane API running
+- (Optional) Docker for building images locally
 
 ## Kind Quickstart
 
@@ -174,11 +197,31 @@ If you prefer manual setup instead of the bootstrap script:
 kind create cluster --name leviathan
 ```
 
-### 2. Build worker image
+### 2. Build or pull worker image
+
+**Option A: Use pre-built GHCR images (recommended)**
 
 ```bash
-docker build -t leviathan-worker:local -f ops/executor/Dockerfile .
+# Pull from GitHub Container Registry
+docker pull ghcr.io/iangreen74/leviathan-worker:latest
+docker pull ghcr.io/iangreen74/leviathan-control-plane:latest
+
+# Tag for kind
+docker tag ghcr.io/iangreen74/leviathan-worker:latest leviathan-worker:local
+docker tag ghcr.io/iangreen74/leviathan-control-plane:latest leviathan-control-plane:local
+
+# Load into kind cluster
 kind load docker-image leviathan-worker:local --name leviathan
+kind load docker-image leviathan-control-plane:local --name leviathan
+```
+
+**Option B: Build locally**
+
+```bash
+docker build -t leviathan-worker:local -f ops/docker/worker.Dockerfile .
+docker build -t leviathan-control-plane:local -f ops/docker/control-plane.Dockerfile .
+kind load docker-image leviathan-worker:local --name leviathan
+kind load docker-image leviathan-control-plane:local --name leviathan
 ```
 
 ### 3. Create namespace

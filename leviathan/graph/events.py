@@ -50,19 +50,26 @@ class EventStore:
     - NDJSON file (local dev)
     """
     
-    def __init__(self, backend: str = "ndjson", postgres_url: Optional[str] = None):
+    def __init__(self, backend: str = "ndjson", postgres_url: Optional[str] = None, ndjson_dir: Optional[str] = None):
         """
         Initialize event store.
         
         Args:
             backend: "postgres" or "ndjson"
             postgres_url: PostgreSQL connection URL (if backend is postgres)
+            ndjson_dir: Optional directory for NDJSON file (for tests, defaults to ~/.leviathan/graph)
         """
         self.backend = backend
         self.postgres_url = postgres_url
         
         if backend == "ndjson":
-            self.ndjson_path = Path.home() / ".leviathan" / "graph" / "events.ndjson"
+            if ndjson_dir:
+                # Use provided directory (for tests)
+                self.ndjson_path = Path(ndjson_dir) / "events.ndjson"
+            else:
+                # Use default home directory
+                self.ndjson_path = Path.home() / ".leviathan" / "graph" / "events.ndjson"
+            
             self.ndjson_path.parent.mkdir(parents=True, exist_ok=True)
             if not self.ndjson_path.exists():
                 self.ndjson_path.touch()

@@ -13,16 +13,25 @@ from datetime import datetime
 from fastapi.testclient import TestClient
 
 # Token is set by conftest.py before module import
-from leviathan.control_plane.api import app
+from leviathan.control_plane.api import app, reset_stores, initialize_stores
 from leviathan.graph.events import EventType
+
+
+@pytest.fixture
+def test_client(tmp_path):
+    """Create test client with isolated storage."""
+    reset_stores()
+    initialize_stores(ndjson_dir=str(tmp_path / "events"), artifacts_dir=str(tmp_path / "artifacts"))
+    return TestClient(app)
 
 
 class TestAuthentication:
     """Test API authentication."""
     
-    def setup_method(self):
-        """Create test client."""
-        self.client = TestClient(app)
+    @pytest.fixture(autouse=True)
+    def setup(self, test_client):
+        """Set up test client."""
+        self.client = test_client
     
     def test_healthz_no_auth_required(self):
         """Health check should not require authentication."""
@@ -82,15 +91,10 @@ class TestAuthentication:
 class TestEventIngestion:
     """Test event ingestion endpoint."""
     
-    def setup_method(self):
-        """Create test client and temporary event store."""
-        self.client = TestClient(app)
-        self.temp_dir = Path(tempfile.mkdtemp())
-    
-    def teardown_method(self):
-        """Clean up temporary directory."""
-        if self.temp_dir.exists():
-            shutil.rmtree(self.temp_dir)
+    @pytest.fixture(autouse=True)
+    def setup(self, test_client):
+        """Set up test client."""
+        self.client = test_client
     
     def test_ingest_minimal_event_bundle(self):
         """Should ingest minimal valid event bundle."""
@@ -217,9 +221,10 @@ class TestEventIngestion:
 class TestGraphSummary:
     """Test graph summary endpoint."""
     
-    def setup_method(self):
-        """Create test client."""
-        self.client = TestClient(app)
+    @pytest.fixture(autouse=True)
+    def setup(self, test_client):
+        """Set up test client."""
+        self.client = test_client
     
     def test_summary_empty_graph(self):
         """Summary should work with empty graph."""
@@ -331,9 +336,10 @@ class TestGraphSummary:
 class TestAttemptEndpoint:
     """Test attempt details endpoint."""
     
-    def setup_method(self):
-        """Create test client."""
-        self.client = TestClient(app)
+    @pytest.fixture(autouse=True)
+    def setup(self, test_client):
+        """Set up test client."""
+        self.client = test_client
     
     def test_get_nonexistent_attempt(self):
         """Should return null node for nonexistent attempt."""

@@ -110,8 +110,29 @@ graph_store: Optional[GraphStore] = None
 artifact_store: Optional[ArtifactStore] = None
 
 
-def initialize_stores():
-    """Initialize stores (called on startup or lazily)."""
+def reset_stores():
+    """Reset global store state (for tests)."""
+    global config, event_store, graph_store, artifact_store
+    
+    if event_store:
+        event_store.close()
+    if graph_store:
+        graph_store.close()
+    
+    config = None
+    event_store = None
+    graph_store = None
+    artifact_store = None
+
+
+def initialize_stores(ndjson_dir: Optional[str] = None, artifacts_dir: Optional[str] = None):
+    """
+    Initialize stores (called on startup or lazily).
+    
+    Args:
+        ndjson_dir: Optional override for NDJSON storage directory (for tests)
+        artifacts_dir: Optional override for artifacts directory (for tests)
+    """
     global config, event_store, graph_store, artifact_store
     
     if event_store is not None:
@@ -129,10 +150,18 @@ def initialize_stores():
         event_store = EventStore(backend="postgres", postgres_url=config.postgres_url)
         graph_store = GraphStore(backend="postgres", postgres_url=config.postgres_url)
     else:
-        event_store = EventStore(backend="ndjson")
+        # Use override directory for tests, or default from config
+        store_dir = ndjson_dir if ndjson_dir else config.ndjson_dir
+        event_store = EventStore(backend="ndjson", ndjson_dir=store_dir)
         graph_store = GraphStore(backend="memory")
     
-    artifact_store = ArtifactStore(storage_root=config.artifacts_dir)
+    # Use override directory for tests, or default from config
+    artifact_root = artifacts_dir if artifacts_dir else config.artifacts_dir
+    # Convert to Path if string
+    if isinstance(artifact_root, str):
+        from pathlib import Path
+        artifact_root = Path(artifact_root)
+    artifact_store = ArtifactStore(storage_root=artifact_root)
     
     print(f"Leviathan Control Plane API initialized")
     print(f"Backend: {config.backend}")

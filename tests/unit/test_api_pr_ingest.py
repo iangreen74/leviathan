@@ -4,15 +4,16 @@ Integration tests for /v1/events/ingest with PR events missing pr_number.
 import pytest
 from fastapi.testclient import TestClient
 from datetime import datetime, timezone
-from leviathan.control_plane.api import app
+from leviathan.control_plane.api import app, reset_stores, initialize_stores
 from leviathan.graph.events import EventStore
 from leviathan.graph.store import GraphStore
 
 
 @pytest.fixture
-def client():
-    """Create test client."""
-    # Token is set by conftest.py
+def client(tmp_path):
+    """Create test client with isolated storage."""
+    reset_stores()
+    initialize_stores(ndjson_dir=str(tmp_path / "events"), artifacts_dir=str(tmp_path / "artifacts"))
     return TestClient(app)
 
 

@@ -15,10 +15,7 @@ class TestLeviathanctlAPIEndpoints:
     
     def setup_method(self):
         """Set up test client and stores."""
-        # Set required environment variable
-        os.environ["LEVIATHAN_CONTROL_PLANE_TOKEN"] = "test-token-12345"
-        
-        # Initialize stores
+        # Initialize stores (token set by conftest.py)
         initialize_stores()
         
         # Create test client

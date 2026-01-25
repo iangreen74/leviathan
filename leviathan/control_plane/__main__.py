@@ -73,13 +73,20 @@ def resolve_target_config(target_arg: str) -> dict:
         cache_dir = Path(config['local_cache_dir']).expanduser()
         config['local_cache_dir'] = str(cache_dir)
         
-        # Set paths to contract/backlog/policy relative to cache dir
-        if 'contract_path' not in config:
-            config['contract_path'] = str(cache_dir / ".leviathan" / "contract.yaml")
-        if 'backlog_path' not in config:
-            config['backlog_path'] = str(cache_dir / ".leviathan" / "backlog.yaml")
-        if 'policy_path' not in config:
-            config['policy_path'] = str(cache_dir / ".leviathan" / "policy.yaml")
+        # Resolve contract/backlog/policy paths relative to cache dir
+        # If paths are relative, resolve them under cache_dir
+        # If paths are absolute, keep them as-is (backward compatibility)
+        for key in ['contract_path', 'backlog_path', 'policy_path']:
+            if key in config:
+                path = Path(config[key])
+                if not path.is_absolute():
+                    # Relative path: resolve under cache_dir
+                    config[key] = str(cache_dir / path)
+                # else: absolute path, keep as-is
+            else:
+                # Key not present: set default
+                filename = key.replace('_path', '.yaml')
+                config[key] = str(cache_dir / ".leviathan" / filename)
     
     return config
 

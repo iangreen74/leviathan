@@ -300,3 +300,12 @@ class EventType:
     # Model events
     MODEL_CALL_STARTED = "model.call_started"
     MODEL_CALL_COMPLETED = "model.call_completed"
+    
+    # Bootstrap events
+    BOOTSTRAP_STARTED = "bootstrap.started"
+    BOOTSTRAP_COMPLETED = "bootstrap.completed"
+    REPO_INDEXED = "repo.indexed"
+    FILE_DISCOVERED = "file.discovered"
+    DOC_DISCOVERED = "doc.discovered"
+    WORKFLOW_DISCOVERED = "workflow.discovered"
+    API_ROUTE_DISCOVERED = "api.route.discovered"

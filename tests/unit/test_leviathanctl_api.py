@@ -6,20 +6,25 @@ import os
 from fastapi.testclient import TestClient
 from datetime import datetime
 
-from leviathan.control_plane.api import app, initialize_stores
+from leviathan.control_plane.api import app, reset_stores, initialize_stores
 from leviathan.graph.schema import NodeType, EdgeType
+
+
+@pytest.fixture
+def test_client(tmp_path):
+    """Create test client with isolated storage."""
+    reset_stores()
+    initialize_stores(ndjson_dir=str(tmp_path / "events"), artifacts_dir=str(tmp_path / "artifacts"))
+    return TestClient(app)
 
 
 class TestLeviathanctlAPIEndpoints:
     """Test API endpoints for leviathanctl."""
     
-    def setup_method(self):
-        """Set up test client and stores."""
-        # Initialize stores (token set by conftest.py)
-        initialize_stores()
-        
-        # Create test client
-        self.client = TestClient(app)
+    @pytest.fixture(autouse=True)
+    def setup(self, test_client):
+        """Set up test client."""
+        self.client = test_client
         self.token = "test-token-12345"
         self.headers = {"Authorization": f"Bearer {self.token}"}
     

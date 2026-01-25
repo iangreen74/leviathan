@@ -32,7 +32,7 @@ spec:
         - name: ATTEMPT_ID
           value: "ATTEMPT_ID"
         - name: CONTROL_PLANE_URL
-          value: "http://leviathan-api:8000"
+          value: "http://leviathan-control-plane:8000"
         - name: CONTROL_PLANE_TOKEN
           valueFrom:
             secretKeyRef:

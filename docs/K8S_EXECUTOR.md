@@ -18,78 +18,175 @@ The K8s executor submits ephemeral Jobs to a Kubernetes cluster. Each Job:
 - kubectl configured
 - Control plane API running
 
-## Quick Start with kind
+## Kind Quickstart
 
-### 1. Install kind
+The fastest way to get Leviathan running on Kubernetes is using our automated bootstrap script.
+
+### Prerequisites
+
+Install required tools:
 
 ```bash
 # macOS
-brew install kind
+brew install kind kubectl docker
 
 # Linux
+# Install Docker: https://docs.docker.com/engine/install/
+# Install kubectl: https://kubernetes.io/docs/tasks/tools/
+# Install kind:
 curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
 chmod +x ./kind
 sudo mv ./kind /usr/local/bin/kind
 ```
 
-### 2. Create kind cluster
+### One-Command Setup
+
+1. **Create environment file** with your credentials:
+
+```bash
+mkdir -p ~/.leviathan
+cat > ~/.leviathan/env << 'EOF'
+export LEVIATHAN_CONTROL_PLANE_TOKEN=$(openssl rand -hex 32)
+export GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+export LEVIATHAN_CLAUDE_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+export LEVIATHAN_CLAUDE_MODEL=claude-3-5-sonnet-20241022
+EOF
+
+# Edit with your actual tokens
+vim ~/.leviathan/env
+```
+
+Get your tokens:
+- **GITHUB_TOKEN**: Create at https://github.com/settings/tokens (needs `repo` scope)
+- **LEVIATHAN_CLAUDE_API_KEY**: Get from https://console.anthropic.com/
+
+2. **Run bootstrap script**:
+
+```bash
+./ops/k8s/kind-bootstrap.sh
+```
+
+This script is **idempotent** and will:
+- ✓ Load environment from `~/.leviathan/env`
+- ✓ Validate all required environment variables
+- ✓ Create Kind cluster `leviathan` (if missing)
+- ✓ Build worker image `leviathan-worker:local`
+- ✓ Load image into Kind cluster
+- ✓ Create namespace `leviathan`
+- ✓ Create/update secrets (without printing values)
+- ✓ Deploy control plane API
+- ✓ Run smoke test against control plane
+
+3. **Run scheduler**:
+
+```bash
+# Load environment
+source ~/.leviathan/env
+
+# Run scheduler with K8s executor
+python3 -m leviathan.control_plane.scheduler \
+  --target <target-name> \
+  --once \
+  --executor k8s
+```
+
+### What Gets Deployed
+
+The bootstrap script creates:
+
+```
+kind cluster: leviathan
+└── namespace: leviathan
+    ├── Secret: leviathan-secrets
+    │   ├── control-plane-token
+    │   ├── github-token
+    │   ├── claude-api-key
+    │   └── claude-model
+    ├── Deployment: leviathan-control-plane
+    │   └── Pod: control plane API (port 8000)
+    └── Service: leviathan-control-plane
+        └── http://leviathan-control-plane:8000
+```
+
+### Monitoring
+
+```bash
+# Watch jobs
+kubectl get jobs -n leviathan -w
+
+# View pod logs
+kubectl logs -f <pod-name> -n leviathan
+
+# Check control plane logs
+kubectl logs -f deployment/leviathan-control-plane -n leviathan
+
+# List all resources
+kubectl get all -n leviathan
+```
+
+### Cleanup
+
+```bash
+# Delete cluster
+kind delete cluster --name leviathan
+
+# Or just delete namespace
+kubectl delete namespace leviathan
+```
+
+### Manual Setup (Alternative)
+
+If you prefer manual setup instead of the bootstrap script:
+
+<details>
+<summary>Click to expand manual steps</summary>
+
+### 1. Create kind cluster
 
 ```bash
 kind create cluster --name leviathan
 ```
 
-### 3. Build worker image
+### 2. Build worker image
 
 ```bash
-# Build image
 docker build -t leviathan-worker:local -f ops/executor/Dockerfile .
-
-# Load into kind
 kind load docker-image leviathan-worker:local --name leviathan
 ```
 
-### 4. Create namespace
+### 3. Create namespace
 
 ```bash
 kubectl apply -f ops/k8s/namespace.yaml
 ```
 
-### 5. Create secrets
+### 4. Create secrets
 
 ```bash
-# Copy template
-cp ops/k8s/secret.template.yaml ops/k8s/secret.yaml
-
-# Edit with your tokens
-# - LEVIATHAN_CONTROL_PLANE_TOKEN: openssl rand -hex 32
-# - GITHUB_TOKEN: https://github.com/settings/tokens
-# - CLAUDE_API_KEY: https://console.anthropic.com/
-
-vim ops/k8s/secret.yaml
-
-# Apply (DO NOT commit secret.yaml)
-kubectl apply -f ops/k8s/secret.yaml
+kubectl create secret generic leviathan-secrets \
+  -n leviathan \
+  --from-literal=control-plane-token="$(openssl rand -hex 32)" \
+  --from-literal=github-token="$GITHUB_TOKEN" \
+  --from-literal=claude-api-key="$LEVIATHAN_CLAUDE_API_KEY" \
+  --from-literal=claude-model="$LEVIATHAN_CLAUDE_MODEL"
 ```
 
-### 6. Start control plane API
+### 5. Deploy control plane
 
 ```bash
-# In separate terminal
-export LEVIATHAN_CONTROL_PLANE_TOKEN=<your-token>
-python3 -m leviathan.control_plane.api
+kubectl apply -f ops/k8s/control-plane.yaml
+kubectl wait --for=condition=available --timeout=120s \
+  deployment/leviathan-control-plane -n leviathan
 ```
 
-### 7. Run scheduler with K8s executor
+### 6. Test control plane
 
 ```bash
-export LEVIATHAN_CONTROL_PLANE_TOKEN=<your-token>
-export LEVIATHAN_EXECUTOR_IMAGE=leviathan-worker:local
-
-python3 -m leviathan.control_plane.scheduler \
-  --target radix \
-  --once \
-  --executor k8s
+kubectl run test --image=curlimages/curl --restart=Never --rm -i -n leviathan -- \
+  curl -f http://leviathan-control-plane:8000/healthz
 ```
+
+</details>
 
 ## Architecture
 
@@ -213,7 +310,7 @@ from leviathan.executors.k8s_executor import K8sExecutor
 executor = K8sExecutor(
     namespace="leviathan",
     image="leviathan-worker:v1.0.0",
-    control_plane_url="http://leviathan-api:8000",
+    control_plane_url="http://leviathan-control-plane:8000",
     control_plane_token="<token>",
     in_cluster=True  # Set True when running inside K8s
 )
@@ -271,7 +368,7 @@ kubectl get secret leviathan-secrets -n leviathan -o yaml
 
 # Test from pod
 kubectl run -it --rm debug --image=curlimages/curl --restart=Never -n leviathan -- \
-  curl http://leviathan-api:8000/healthz
+  curl http://leviathan-control-plane:8000/healthz
 ```
 
 ### Job stuck in pending
@@ -297,21 +394,22 @@ kubectl describe pod <pod-name> -n leviathan
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: leviathan-api
+  name: leviathan-control-plane
   namespace: leviathan
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: leviathan-api
+      app: leviathan-control-plane
   template:
     metadata:
       labels:
-        app: leviathan-api
+        app: leviathan-control-plane
     spec:
       containers:
       - name: api
-        image: leviathan-api:v1.0.0
+        image: leviathan-worker:v1.0.0
+        command: ["python", "-m", "leviathan.control_plane.api"]
         env:
         - name: LEVIATHAN_CONTROL_PLANE_TOKEN
           valueFrom:
@@ -331,11 +429,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: leviathan-api
+  name: leviathan-control-plane
   namespace: leviathan
 spec:
   selector:
-    app: leviathan-api
+    app: leviathan-control-plane
   ports:
   - port: 8000
     targetPort: 8000

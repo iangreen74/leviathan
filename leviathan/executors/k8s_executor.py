@@ -49,7 +49,7 @@ class K8sExecutor(Executor):
         """
         self.namespace = namespace
         self.image = image or os.getenv("LEVIATHAN_EXECUTOR_IMAGE", "leviathan-worker:local")
-        self.control_plane_url = control_plane_url or os.getenv("LEVIATHAN_CONTROL_PLANE_URL", "http://leviathan-api:8000")
+        self.control_plane_url = control_plane_url or os.getenv("LEVIATHAN_CONTROL_PLANE_URL", "http://leviathan-control-plane:8000")
         self.control_plane_token = control_plane_token or os.getenv("LEVIATHAN_CONTROL_PLANE_TOKEN")
         
         if artifact_store is None:

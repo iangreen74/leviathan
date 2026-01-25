@@ -259,7 +259,9 @@ class TestWorkerEventBundle:
         assert event['actor_id'] == 'worker-attempt-abc123'
     
     def test_load_task_spec_structure(self):
-        """Task spec should have expected structure."""
+        """Task spec should return Task object with expected structure."""
+        from leviathan.backlog import Task
+        
         worker = create_mock_worker(self.temp_dir)
         worker.target_dir = self.temp_dir / "target"
         worker.target_dir.mkdir(parents=True, exist_ok=True)
@@ -281,8 +283,11 @@ tasks:
         
         task_spec = worker._load_task_spec()
         
-        # Verify required fields
-        assert 'id' in task_spec
-        assert 'title' in task_spec
-        assert 'scope' in task_spec
-        assert task_spec['id'] == 'task-001'
+        # Verify it's a Task object
+        assert isinstance(task_spec, Task)
+        
+        # Verify required fields accessible via attributes
+        assert task_spec.id == 'task-001'
+        assert task_spec.title == 'Test Task'
+        assert task_spec.scope == 'test'
+        assert isinstance(task_spec.allowed_paths, list)

@@ -12,8 +12,7 @@ class TestK8sJobSpec:
     
     def setup_method(self):
         """Create K8s executor (without connecting to cluster)."""
-        # Set env vars to avoid K8s client initialization
-        os.environ["LEVIATHAN_CONTROL_PLANE_TOKEN"] = "test-token"
+        # Token is set by conftest.py - don't override it
         
         # Create executor without initializing K8s client
         self.executor = K8sExecutor.__new__(K8sExecutor)

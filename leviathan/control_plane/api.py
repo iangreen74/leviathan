@@ -115,9 +115,15 @@ def reset_stores():
     global config, event_store, graph_store, artifact_store
     
     if event_store:
-        event_store.close()
+        try:
+            event_store.close()
+        except:
+            pass
     if graph_store:
-        graph_store.close()
+        try:
+            graph_store.close()
+        except:
+            pass
     
     config = None
     event_store = None

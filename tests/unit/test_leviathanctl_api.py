@@ -10,23 +10,20 @@ from leviathan.control_plane.api import app, reset_stores, initialize_stores
 from leviathan.graph.schema import NodeType, EdgeType
 
 
-@pytest.fixture
-def test_client(tmp_path):
-    """Create test client with isolated storage."""
-    reset_stores()
-    initialize_stores(ndjson_dir=str(tmp_path / "events"), artifacts_dir=str(tmp_path / "artifacts"))
-    return TestClient(app)
-
-
 class TestLeviathanctlAPIEndpoints:
     """Test API endpoints for leviathanctl."""
     
     @pytest.fixture(autouse=True)
-    def setup(self, test_client):
-        """Set up test client."""
-        self.client = test_client
+    def setup(self, tmp_path):
+        """Set up test client with isolated storage."""
+        reset_stores()
+        initialize_stores(ndjson_dir=str(tmp_path / "events"), artifacts_dir=str(tmp_path / "artifacts"))
+        self.client = TestClient(app)
         self.token = "test-token-12345"
         self.headers = {"Authorization": f"Bearer {self.token}"}
+        yield
+        # Cleanup after test
+        reset_stores()
     
     def test_list_attempts_unauthorized(self):
         """Should return 401 without valid token."""

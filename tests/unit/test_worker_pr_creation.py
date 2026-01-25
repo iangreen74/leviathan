@@ -4,6 +4,7 @@ Unit tests for worker PR creation and git operations.
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from leviathan.executor.worker import Worker, WorkerError
+from leviathan.backlog import Task
 
 
 class TestWorkerPRCreation:
@@ -164,11 +165,17 @@ class TestWorkerPRCreation:
         mock_response.raise_for_status = Mock()
         mock_post.return_value = mock_response
         
-        task_spec = {
-            'title': 'Test Task',
-            'scope': 'test',
-            'acceptance_criteria': ['Test passes']
-        }
+        task_spec = Task(
+            id='task-1',
+            title='Test Task',
+            scope='test',
+            priority='high',
+            ready=True,
+            allowed_paths=[],
+            acceptance_criteria=['Test passes'],
+            dependencies=[],
+            estimated_size='small'
+        )
         
         pr_url, pr_number = worker._create_pr("test-branch", task_spec)
         
@@ -197,7 +204,17 @@ class TestWorkerPRCreation:
         })
         worker._create_pr = Worker._create_pr.__get__(worker)
         
-        task_spec = {'title': 'Test Task'}
+        task_spec = Task(
+            id='task-1',
+            title='Test Task',
+            scope='test',
+            priority='high',
+            ready=True,
+            allowed_paths=[],
+            acceptance_criteria=[],
+            dependencies=[],
+            estimated_size='small'
+        )
         
         pr_url, pr_number = worker._create_pr("test-branch", task_spec)
         
@@ -210,8 +227,20 @@ class TestWorkerPRCreation:
         worker.github_token = None
         worker._create_pr = Worker._create_pr.__get__(worker)
         
+        task_spec = Task(
+            id='task-1',
+            title='Test',
+            scope='test',
+            priority='high',
+            ready=True,
+            allowed_paths=[],
+            acceptance_criteria=[],
+            dependencies=[],
+            estimated_size='small'
+        )
+        
         with pytest.raises(WorkerError, match="GITHUB_TOKEN required"):
-            worker._create_pr("test-branch", {})
+            worker._create_pr("test-branch", task_spec)
     
     def test_branch_name_format(self):
         """Should use collision-safe branch naming."""

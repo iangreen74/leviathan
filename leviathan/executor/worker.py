@@ -35,6 +35,8 @@ import requests
 from leviathan.artifacts.store import ArtifactStore
 from leviathan.model_client import ModelClient
 from leviathan.rewrite_mode import RewriteModeError
+from leviathan.backlog import Task
+from leviathan.backlog_loader import load_backlog_tasks
 
 
 class WorkerError(Exception):
@@ -138,7 +140,7 @@ class Worker:
                     'attempt_id': self.attempt_id,
                     'pr_url': pr_url,
                     'pr_number': pr_number,
-                    'title': f"Leviathan: {task_spec.get('title', self.task_id)}",
+                    'title': f"Leviathan: {task_spec.title}",
                     'state': 'open'
                 })
                 
@@ -208,42 +210,59 @@ class Worker:
         
         print(f"✓ Cloned to {self.target_dir}")
     
-    def _load_task_spec(self) -> Dict[str, Any]:
+    def _load_task_spec(self) -> Task:
         """
         Load task specification from backlog.
         
         Returns:
-            Task specification dict
+            Task object with typed fields
         """
         backlog_path = self.target_dir / ".leviathan" / "backlog.yaml"
         
         if not backlog_path.exists():
             raise WorkerError(f"Backlog not found: {backlog_path}")
         
-        with open(backlog_path, 'r') as f:
-            backlog_data = yaml.safe_load(f)
+        # Load and normalize tasks using backlog_loader
+        tasks = load_backlog_tasks(backlog_path)
         
         # Find task by ID
-        tasks = backlog_data.get('tasks', [])
-        for task in tasks:
-            if task.get('id') == self.task_id:
-                return task
+        for task_dict in tasks:
+            if task_dict.get('id') == self.task_id:
+                # Convert dict to Task object
+                return Task(
+                    id=task_dict['id'],
+                    title=task_dict.get('title', 'Untitled'),
+                    scope=task_dict.get('scope', 'unknown'),
+                    priority=task_dict.get('priority', 'medium'),
+                    ready=task_dict.get('ready', True),
+                    allowed_paths=task_dict.get('allowed_paths', []),
+                    acceptance_criteria=task_dict.get('acceptance_criteria', []),
+                    dependencies=task_dict.get('dependencies', []),
+                    estimated_size=task_dict.get('estimated_size', 'unknown'),
+                    status=task_dict.get('status'),
+                    pr_number=task_dict.get('pr_number'),
+                    branch_name=task_dict.get('branch_name')
+                )
         
         raise WorkerError(f"Task {self.task_id} not found in backlog")
     
-    def _execute_task(self, task_spec: Dict[str, Any]) -> bool:
+    def _execute_task(self, task_spec: Task) -> bool:
         """
         Execute task using rewrite mode.
         
         Args:
-            task_spec: Task specification
+            task_spec: Task object with typed fields
             
         Returns:
             True if successful
         """
-        print(f"Executing task: {task_spec.get('title', 'Unknown')}")
-        print(f"Scope: {task_spec.get('scope', 'Unknown')}")
-        print(f"Allowed paths: {len(task_spec.get('allowed_paths', []))} file(s)")
+        print(f"Executing task: {task_spec.title}")
+        print(f"Scope: {task_spec.scope}")
+        print(f"Allowed paths: {len(task_spec.allowed_paths)} file(s)")
+        
+        # Validate allowed_paths
+        if not isinstance(task_spec.allowed_paths, list):
+            raise WorkerError(f"Task {task_spec.id}: allowed_paths must be a list, got {type(task_spec.allowed_paths).__name__}")
         
         # Initialize model client
         model = ModelClient(repo_root=self.target_dir)
@@ -261,9 +280,9 @@ class Worker:
             # Store execution log
             log_content = f"""Worker execution log for {self.attempt_id}
 
-Task: {task_spec.get('title', 'Unknown')}
-Scope: {task_spec.get('scope', 'Unknown')}
-Allowed paths: {task_spec.get('allowed_paths', [])}
+Task: {task_spec.title}
+Scope: {task_spec.scope}
+Allowed paths: {task_spec.allowed_paths}
 
 Execution:
 - Mode: rewrite
@@ -423,7 +442,7 @@ Status: Success
         
         raise WorkerError(f"Could not parse GitHub repo from URL: {repo_url}")
     
-    def _create_pr(self, branch_name: str, task_spec: Dict[str, Any]) -> Tuple[str, int]:
+    def _create_pr(self, branch_name: str, task_spec: Task) -> Tuple[str, int]:
         """
         Create pull request using GitHub API.
         
@@ -443,15 +462,15 @@ Status: Success
         owner, repo = self._extract_repo_info(self.target_repo_url)
         
         # Build PR title and body
-        title = f"Leviathan: {task_spec.get('title', self.task_id)}"
+        title = f"Leviathan: {task_spec.title}"
         body = f"""Automated PR from Leviathan
 
 **Task ID:** {self.task_id}
 **Attempt ID:** {self.attempt_id}
-**Scope:** {task_spec.get('scope', 'Unknown')}
+**Scope:** {task_spec.scope}
 
 **Acceptance Criteria:**
-{self._format_acceptance_criteria(task_spec.get('acceptance_criteria', []))}
+{self._format_acceptance_criteria(task_spec.acceptance_criteria)}
 
 ---
 *This PR was automatically generated by Leviathan*

@@ -37,6 +37,7 @@ from leviathan.model_client import ModelClient
 from leviathan.rewrite_mode import RewriteModeError
 from leviathan.backlog import Task
 from leviathan.backlog_loader import load_backlog_tasks
+from leviathan.bootstrap.indexer import RepositoryIndexer, load_bootstrap_config
 
 
 class WorkerError(Exception):
@@ -114,35 +115,54 @@ class Worker:
             # Load task spec from backlog
             task_spec = self._load_task_spec()
             
-            # Execute task using rewrite mode
-            success = self._execute_task(task_spec)
+            # Check if this is a bootstrap task
+            is_bootstrap = (
+                task_spec.scope == "bootstrap" or 
+                self.task_id.startswith("bootstrap-")
+            )
+            
+            if is_bootstrap:
+                # Execute bootstrap (deterministic, no model calls)
+                success = self._execute_bootstrap(task_spec)
+            else:
+                # Execute task using rewrite mode
+                success = self._execute_task(task_spec)
             
             if success:
-                # Commit and push
-                branch_name = f"agent/{self.task_id}-{self.attempt_id}"
-                commit_sha = self._commit_and_push(branch_name)
-                
-                # Create PR
-                pr_url, pr_number = self._create_pr(branch_name, task_spec)
-                
-                # Emit success events
-                self._emit_event("attempt.succeeded", {
-                    'attempt_id': self.attempt_id,
-                    'status': 'succeeded',
-                    'completed_at': datetime.utcnow().isoformat(),
-                    'branch_name': branch_name,
-                    'commit_sha': commit_sha,
-                    'pr_url': pr_url,
-                    'pr_number': pr_number
-                })
-                
-                self._emit_event("pr.created", {
-                    'attempt_id': self.attempt_id,
-                    'pr_url': pr_url,
-                    'pr_number': pr_number,
-                    'title': f"Leviathan: {task_spec.title}",
-                    'state': 'open'
-                })
+                if is_bootstrap:
+                    # Bootstrap tasks don't create PRs (read-only)
+                    self._emit_event("attempt.succeeded", {
+                        'attempt_id': self.attempt_id,
+                        'status': 'succeeded',
+                        'completed_at': datetime.utcnow().isoformat(),
+                        'artifacts_count': len(self.artifacts)
+                    })
+                else:
+                    # Regular tasks: commit, push, create PR
+                    branch_name = f"agent/{self.task_id}-{self.attempt_id}"
+                    commit_sha = self._commit_and_push(branch_name)
+                    
+                    # Create PR
+                    pr_url, pr_number = self._create_pr(branch_name, task_spec)
+                    
+                    # Emit success events
+                    self._emit_event("attempt.succeeded", {
+                        'attempt_id': self.attempt_id,
+                        'status': 'succeeded',
+                        'completed_at': datetime.utcnow().isoformat(),
+                        'branch_name': branch_name,
+                        'commit_sha': commit_sha,
+                        'pr_url': pr_url,
+                        'pr_number': pr_number
+                    })
+                    
+                    self._emit_event("pr.created", {
+                        'attempt_id': self.attempt_id,
+                        'pr_url': pr_url,
+                        'pr_number': pr_number,
+                        'title': f"Leviathan: {task_spec.title}",
+                        'state': 'open'
+                    })
                 
                 # Post event bundle
                 self._post_event_bundle()
@@ -324,10 +344,102 @@ Status: Success
             return True
             
         except RewriteModeError as e:
-            print(f"✗ Rewrite mode failed: {e}")
+            print(f"✗ Rewrite mode error: {e}")
             return False
+        
         except Exception as e:
-            print(f"✗ Task execution failed: {e}")
+            print(f"✗ Task execution error: {e}")
+            return False
+    
+    def _execute_bootstrap(self, task_spec: Task) -> bool:
+        """
+        Execute bootstrap indexing (deterministic, no model calls).
+        
+        Args:
+            task_spec: Task specification
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            print("\n=== Bootstrap Indexing ===")
+            print(f"Target: {self.target_name}")
+            print(f"Repository: {self.target_repo_url}")
+            
+            # Get current commit SHA
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=self.target_dir,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            commit_sha = result.stdout.strip()
+            
+            # Load bootstrap config if present
+            config = load_bootstrap_config(self.target_dir)
+            
+            # Create indexer
+            indexer = RepositoryIndexer(self.target_dir, config)
+            
+            # Run indexing
+            print("\nIndexing repository...")
+            result = indexer.index_repository(
+                target_id=self.target_name,
+                repo_url=self.target_repo_url,
+                commit_sha=commit_sha,
+                default_branch=self.target_branch
+            )
+            
+            # Add events to worker's event list
+            print(f"\n✓ Indexed {result['manifest']['counts']['total_files']} files")
+            print(f"  - Docs: {result['manifest']['counts']['docs']}")
+            print(f"  - Workflows: {result['manifest']['counts']['workflows']}")
+            print(f"  - API routes: {result['manifest']['counts']['api_routes']}")
+            
+            # Store all events
+            for event in result['events']:
+                self.events.append(event)
+            
+            # Store artifacts
+            for artifact_name, artifact_content in result['artifacts'].items():
+                artifact_meta = self.artifact_store.store(
+                    artifact_content.encode('utf-8') if isinstance(artifact_content, str) else artifact_content,
+                    "bootstrap",
+                    metadata={
+                        'attempt_id': self.attempt_id,
+                        'task_id': self.task_id,
+                        'artifact_name': artifact_name
+                    }
+                )
+                
+                self.artifacts.append({
+                    'sha256': artifact_meta['sha256'],
+                    'kind': 'bootstrap',
+                    'uri': f"file://{artifact_meta['storage_path']}",
+                    'size': artifact_meta['size_bytes'],
+                    'name': artifact_name
+                })
+                
+                print(f"  - Artifact: {artifact_name} ({artifact_meta['size_bytes']} bytes)")
+            
+            # Emit artifact.created events
+            for artifact in self.artifacts:
+                self._emit_event("artifact.created", {
+                    'artifact_id': f"artifact-{uuid.uuid4().hex[:8]}",
+                    'attempt_id': self.attempt_id,
+                    'sha256': artifact['sha256'],
+                    'artifact_type': artifact['kind'],
+                    'size_bytes': artifact['size'],
+                    'storage_path': artifact['uri'],
+                    'name': artifact.get('name', '')
+                })
+            
+            print("\n✓ Bootstrap completed successfully")
+            return True
+        
+        except Exception as e:
+            print(f"✗ Bootstrap error: {e}")
             return False
     
     def _commit_and_push(self, branch_name: str) -> str:

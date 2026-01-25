@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: leviathan-control-plane-config
+  namespace: leviathan
+  labels:
+    app: leviathan
+    component: control-plane
+data:
+  # Backend storage for events and graph state
+  # Options: ndjson (file-based, dev/testing), postgres (production)
+  LEVIATHAN_CONTROL_PLANE_BACKEND: "ndjson"
+  
+  # NDJSON backend settings (when backend=ndjson)
+  LEVIATHAN_NDJSON_DIR: "/data/events"
+  
+  # PostgreSQL settings (when backend=postgres)
+  # Uncomment and configure when using postgres backend:
+  # POSTGRES_HOST: "postgres.leviathan.svc.cluster.local"
+  # POSTGRES_PORT: "5432"
+  # POSTGRES_DB: "leviathan"
+  # POSTGRES_USER: "leviathan"
+  # Note: POSTGRES_PASSWORD should be in secret, not configmap
+  
+  # API server settings
+  LEVIATHAN_API_HOST: "0.0.0.0"
+  LEVIATHAN_API_PORT: "8000"

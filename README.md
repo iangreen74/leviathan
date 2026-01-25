@@ -78,11 +78,41 @@ Each target repository must provide:
 
 See `docs/TARGET_CONTRACT.md` for details.
 
+## Operator Commands
+
+Query and operate the control plane using `leviathanctl`:
+
+```bash
+# Set up authentication
+export LEVIATHAN_API_URL=http://localhost:8000
+export LEVIATHAN_CONTROL_PLANE_TOKEN=$(cat ~/.leviathan/control-plane-token)
+
+# View graph summary
+python3 -m leviathan.cli.leviathanctl graph-summary
+
+# List recent attempts
+python3 -m leviathan.cli.leviathanctl attempts-list --limit 10
+
+# List recent failures
+python3 -m leviathan.cli.leviathanctl failures-recent --limit 10
+
+# Show attempt details
+python3 -m leviathan.cli.leviathanctl attempts-show <attempt-id>
+
+# Invalidate attempt for retry
+python3 -m leviathan.cli.leviathanctl invalidate <attempt-id> --reason "..."
+```
+
+See [leviathanctl documentation](docs/LEVIATHANCTL.md) for full details.
+
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) - System design and components
 - [Target Contract](docs/TARGET_CONTRACT.md) - Contract format specification
 - [Runbook Node A](docs/RUNBOOK_NODE_A.md) - Production deployment guide
+- [leviathanctl CLI](docs/LEVIATHANCTL.md) - Operator CLI reference
+- [Control Plane Deployment](docs/DEPLOY_CONTROL_PLANE.md) - K8s deployment guide
+- [K8s Executor Setup](docs/K8S_EXECUTOR.md) - Kubernetes executor guide
 - [Development](docs/DEVELOPMENT.md) - Contributing and testing
 
 ## Security

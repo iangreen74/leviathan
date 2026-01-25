@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: leviathan-control-plane
+  namespace: leviathan
+  labels:
+    app: leviathan
+    component: control-plane
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: leviathan
+      component: control-plane
+  template:
+    metadata:
+      labels:
+        app: leviathan
+        component: control-plane
+    spec:
+      containers:
+      - name: control-plane
+        image: ghcr.io/iangreen74/leviathan-control-plane:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: leviathan-control-plane-config
+        - secretRef:
+            name: leviathan-control-plane-secret
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        emptyDir: {}
+      # For production with postgres backend, remove emptyDir and use PVC:
+      # - name: data
+      #   persistentVolumeClaim:
+      #     claimName: leviathan-control-plane-data

@@ -142,7 +142,7 @@ class CommitNode(NodeProperties):
 class PullRequestNode(NodeProperties):
     """GitHub pull request."""
     node_type: NodeType = NodeType.PULL_REQUEST
-    pr_number: int
+    pr_number: Optional[int] = None
     pr_url: str
     title: str
     state: str = Field(..., description="open, closed, merged")

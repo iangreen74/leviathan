@@ -53,8 +53,15 @@ class GraphStore:
         Returns:
             Validated node properties
         """
+        # Enrich properties with node_id and created_at for validation
+        enriched_properties = {
+            'node_id': node_id,
+            'created_at': properties.get('created_at', datetime.utcnow()),
+            **properties
+        }
+        
         # Validate properties
-        validated = validate_node(node_type, properties)
+        validated = validate_node(node_type, enriched_properties)
         
         if self.backend == "memory":
             self.nodes[node_id] = {
@@ -319,8 +326,20 @@ class GraphStore:
         
         # PR events
         elif event_type == EventType.PR_CREATED:
+            # Generate node_id based on available fields
+            if 'pr_number' in payload:
+                node_id = f"pr-{payload['pr_number']}"
+            elif 'pr_url' in payload and payload['pr_url']:
+                # Hash pr_url for deterministic node_id
+                import hashlib
+                url_hash = hashlib.sha256(payload['pr_url'].encode()).hexdigest()[:12]
+                node_id = f"pr-{url_hash}"
+            else:
+                # Fallback to event_id
+                node_id = f"pr-{event.event_id[:12]}"
+            
             self.upsert_node(
-                node_id=f"pr-{payload['pr_number']}",
+                node_id=node_id,
                 node_type=NodeType.PULL_REQUEST,
                 properties=payload
             )
@@ -329,7 +348,7 @@ class GraphStore:
                 self.add_edge(
                     edge_type=EdgeType.PRODUCED,
                     from_node=payload['attempt_id'],
-                    to_node=f"pr-{payload['pr_number']}",
+                    to_node=node_id,
                     properties={'created_at': event.timestamp}
                 )
     

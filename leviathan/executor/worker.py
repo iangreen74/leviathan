@@ -130,14 +130,11 @@ class Worker:
                 
                 if pr_url:
                     self._emit_event("pr.created", {
-                        'pr_id': f"pr-{uuid.uuid4().hex[:8]}",
-                        'node_id': f"pr-{uuid.uuid4().hex[:8]}",
-                        'node_type': 'PR',
                         'attempt_id': self.attempt_id,
                         'pr_url': pr_url,
-                        'branch_name': branch_name,
-                        'status': 'open',
-                        'created_at': datetime.utcnow().isoformat()
+                        'title': f"Task {self.task_id}",
+                        'state': 'open'
+                        # pr_number omitted for placeholder PRs
                     })
                 
                 # Post event bundle

@@ -94,7 +94,7 @@ class TestRewritePrompt:
         
         # Should include example with Python test file
         assert "test_example.py" in prompt
-        assert "Example showing Python test file with dict literal" in prompt
+        assert "Python test with dict literal" in prompt
     
     def test_prompt_without_special_filetypes(self):
         """Prompt should work without filetype-specific instructions for unknown types."""

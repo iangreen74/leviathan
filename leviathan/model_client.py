@@ -341,7 +341,7 @@ Generate the implementation patch now:"""
     def generate_implementation_rewrite_mode(
         self, 
         task: Task, 
-        max_retries: int = 1,
+        max_retries: int = 2,
         retry_context: Optional[Dict[str, str]] = None
     ) -> Tuple[List[str], str]:
         """

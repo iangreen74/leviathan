@@ -46,7 +46,6 @@ sudo mv ./kind /usr/local/bin/kind
 ```bash
 mkdir -p ~/.leviathan
 cat > ~/.leviathan/env << 'EOF'
-export LEVIATHAN_CONTROL_PLANE_TOKEN=$(openssl rand -hex 32)
 export GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 export LEVIATHAN_CLAUDE_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 export LEVIATHAN_CLAUDE_MODEL=claude-3-5-sonnet-20241022
@@ -60,6 +59,8 @@ Get your tokens:
 - **GITHUB_TOKEN**: Create at https://github.com/settings/tokens (needs `repo` scope)
 - **LEVIATHAN_CLAUDE_API_KEY**: Get from https://console.anthropic.com/
 
+**Note**: The control plane token is auto-generated and persisted to `~/.leviathan/control-plane-token` on first run.
+
 2. **Run bootstrap script**:
 
 ```bash
@@ -68,6 +69,7 @@ Get your tokens:
 
 This script is **idempotent** and will:
 - ✓ Load environment from `~/.leviathan/env`
+- ✓ Generate and persist control plane token (once)
 - ✓ Validate all required environment variables
 - ✓ Create Kind cluster `leviathan` (if missing)
 - ✓ Build worker image `leviathan-worker:local`
@@ -75,16 +77,19 @@ This script is **idempotent** and will:
 - ✓ Create namespace `leviathan`
 - ✓ Create/update secrets (without printing values)
 - ✓ Deploy control plane API
-- ✓ Run smoke test against control plane
+- ✓ Run smoke tests:
+  - Health check endpoint
+  - Event ingestion with authentication
 
 3. **Run scheduler**:
 
 ```bash
-# Load environment
+# Load environment and token
 source ~/.leviathan/env
+export LEVIATHAN_CONTROL_PLANE_TOKEN=$(cat ~/.leviathan/control-plane-token)
 
 # Run scheduler with K8s executor
-python3 -m leviathan.control_plane.scheduler \
+python3 -m leviathan.control_plane \
   --target <target-name> \
   --once \
   --executor k8s

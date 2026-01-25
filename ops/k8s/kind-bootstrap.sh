@@ -60,6 +60,8 @@ fail() {
 
 # Load environment from ~/.leviathan/env if present
 ENV_FILE="$HOME/.leviathan/env"
+TOKEN_FILE="$HOME/.leviathan/control-plane-token"
+
 if [[ -f "$ENV_FILE" ]]; then
     log_info "Loading environment from $ENV_FILE"
     # shellcheck disable=SC1090
@@ -70,11 +72,31 @@ else
     log_info "Will use existing environment variables"
 fi
 
+# Generate and persist control plane token if not exists
+if [[ -f "$TOKEN_FILE" ]]; then
+    log_info "Loading existing control plane token from $TOKEN_FILE"
+    LEVIATHAN_CONTROL_PLANE_TOKEN=$(cat "$TOKEN_FILE")
+    log_success "Control plane token loaded"
+else
+    if [[ -z "${LEVIATHAN_CONTROL_PLANE_TOKEN:-}" ]]; then
+        log_info "Generating new control plane token..."
+        LEVIATHAN_CONTROL_PLANE_TOKEN=$(openssl rand -hex 32)
+        log_success "Control plane token generated"
+    else
+        log_info "Using control plane token from environment"
+    fi
+    
+    # Persist token for future runs
+    mkdir -p "$(dirname "$TOKEN_FILE")"
+    echo "$LEVIATHAN_CONTROL_PLANE_TOKEN" > "$TOKEN_FILE"
+    chmod 600 "$TOKEN_FILE"
+    log_success "Control plane token persisted to $TOKEN_FILE"
+fi
+
 # Validate required environment variables
 log_info "Validating required environment variables..."
 
 REQUIRED_VARS=(
-    "LEVIATHAN_CONTROL_PLANE_TOKEN"
     "GITHUB_TOKEN"
     "LEVIATHAN_CLAUDE_API_KEY"
     "LEVIATHAN_CLAUDE_MODEL"
@@ -96,10 +118,11 @@ if [[ ${#MISSING_VARS[@]} -gt 0 ]]; then
     echo "Please set these variables in your environment or in ~/.leviathan/env"
     echo ""
     echo "Example ~/.leviathan/env:"
-    echo "  export LEVIATHAN_CONTROL_PLANE_TOKEN=\$(openssl rand -hex 32)"
     echo "  export GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
     echo "  export LEVIATHAN_CLAUDE_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
     echo "  export LEVIATHAN_CLAUDE_MODEL=claude-3-5-sonnet-20241022"
+    echo ""
+    echo "Note: LEVIATHAN_CONTROL_PLANE_TOKEN is auto-generated and stored in $TOKEN_FILE"
     exit 1
 fi
 
@@ -176,14 +199,15 @@ kubectl wait --for=condition=available --timeout=120s \
     deployment/leviathan-control-plane -n "$NAMESPACE"
 log_success "Control plane is ready"
 
-# Run smoke test
-log_info "Running smoke test against control plane..."
+# Run smoke tests
+log_info "Running smoke tests against control plane..."
 
 # Wait a bit for the service to be fully ready
 sleep 5
 
-# Run curl test from within the cluster
-SMOKE_TEST_POD="leviathan-smoke-test-$$"
+# Test 1: Health check
+log_info "Test 1: Health check endpoint..."
+SMOKE_TEST_POD="leviathan-smoke-healthz-$$"
 kubectl run "$SMOKE_TEST_POD" \
     --image=curlimages/curl:latest \
     --restart=Never \
@@ -191,9 +215,67 @@ kubectl run "$SMOKE_TEST_POD" \
     -i \
     -n "$NAMESPACE" \
     --command -- \
-    curl -f -s http://leviathan-control-plane:8000/healthz
+    curl -f -s http://leviathan-control-plane:8000/healthz > /dev/null
 
-log_success "Smoke test passed - control plane is accessible"
+log_success "Health check passed"
+
+# Test 2: Event ingestion with token from secret
+log_info "Test 2: Event ingestion with authentication..."
+SMOKE_TEST_POD="leviathan-smoke-ingest-$$"
+
+# Create a minimal event payload
+EVENT_PAYLOAD='{"events":[{"event_id":"smoke-test-'$(date +%s)'","event_type":"test.smoke","timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","actor_id":"smoke-test","payload":{"test":true}}]}'
+
+# Run pod with secret mounted to test event ingestion
+kubectl run "$SMOKE_TEST_POD" \
+    --image=curlimages/curl:latest \
+    --restart=Never \
+    --rm \
+    -i \
+    -n "$NAMESPACE" \
+    --env="EVENT_PAYLOAD=$EVENT_PAYLOAD" \
+    --overrides='
+{
+  "spec": {
+    "containers": [
+      {
+        "name": "'"$SMOKE_TEST_POD"'",
+        "image": "curlimages/curl:latest",
+        "command": ["/bin/sh", "-c"],
+        "args": ["curl -f -s -X POST http://leviathan-control-plane:8000/v1/events/ingest -H \"Authorization: Bearer $(cat /secrets/control-plane-token)\" -H \"Content-Type: application/json\" -d \"$EVENT_PAYLOAD\""],
+        "env": [
+          {
+            "name": "EVENT_PAYLOAD",
+            "value": "'"$EVENT_PAYLOAD"'"
+          }
+        ],
+        "volumeMounts": [
+          {
+            "name": "secrets",
+            "mountPath": "/secrets",
+            "readOnly": true
+          }
+        ]
+      }
+    ],
+    "volumes": [
+      {
+        "name": "secrets",
+        "secret": {
+          "secretName": "'"$SECRET_NAME"'",
+          "items": [
+            {
+              "key": "control-plane-token",
+              "path": "control-plane-token"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}' > /dev/null
+
+log_success "Event ingestion test passed - authentication working"
 
 # Print summary
 echo ""
@@ -204,17 +286,21 @@ echo ""
 echo "Cluster: kind-${CLUSTER_NAME}"
 echo "Namespace: ${NAMESPACE}"
 echo "Control Plane: http://leviathan-control-plane:8000 (in-cluster)"
+echo "Control Plane Token: $TOKEN_FILE"
 echo ""
 echo "Next steps:"
-echo "  1. Run scheduler with K8s executor:"
+echo "  1. Export token for local scheduler use:"
+echo "     export LEVIATHAN_CONTROL_PLANE_TOKEN=\$(cat $TOKEN_FILE)"
+echo ""
+echo "  2. Run scheduler with K8s executor:"
 echo "     python3 -m leviathan.control_plane.scheduler --target <name> --once --executor k8s"
 echo ""
-echo "  2. Monitor jobs:"
+echo "  3. Monitor jobs:"
 echo "     kubectl get jobs -n ${NAMESPACE} -w"
 echo ""
-echo "  3. View pod logs:"
+echo "  4. View pod logs:"
 echo "     kubectl logs -f <pod-name> -n ${NAMESPACE}"
 echo ""
-echo "  4. Check control plane logs:"
+echo "  5. Check control plane logs:"
 echo "     kubectl logs -f deployment/leviathan-control-plane -n ${NAMESPACE}"
 echo ""

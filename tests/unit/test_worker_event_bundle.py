@@ -261,11 +261,28 @@ class TestWorkerEventBundle:
     def test_load_task_spec_structure(self):
         """Task spec should have expected structure."""
         worker = create_mock_worker(self.temp_dir)
+        worker.target_dir = self.temp_dir / "target"
+        worker.target_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create mock backlog file
+        backlog_dir = worker.target_dir / ".leviathan"
+        backlog_dir.mkdir(parents=True, exist_ok=True)
+        backlog_file = backlog_dir / "backlog.yaml"
+        backlog_file.write_text("""
+tasks:
+  - id: task-001
+    title: Test Task
+    scope: test
+    priority: high
+    estimated_size: small
+    allowed_paths: []
+    acceptance_criteria: []
+""")
         
         task_spec = worker._load_task_spec()
         
-        # Verify required fields (placeholder implementation)
-        assert 'task_id' in task_spec
+        # Verify required fields
+        assert 'id' in task_spec
         assert 'title' in task_spec
         assert 'scope' in task_spec
-        assert task_spec['task_id'] == 'task-001'
+        assert task_spec['id'] == 'task-001'

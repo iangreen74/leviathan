@@ -24,13 +24,17 @@ import sys
 import uuid
 import json
 import subprocess
+import re
+import yaml
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Tuple
 
 import requests
 
 from leviathan.artifacts.store import ArtifactStore
+from leviathan.model_client import ModelClient
+from leviathan.rewrite_mode import RewriteModeError
 
 
 class WorkerError(Exception):
@@ -105,19 +109,19 @@ class Worker:
             # Clone repo
             self._clone_repo()
             
-            # Load task spec (placeholder - would load from .leviathan/backlog.yaml)
+            # Load task spec from backlog
             task_spec = self._load_task_spec()
             
-            # Execute task (placeholder - would integrate with runner.py)
+            # Execute task using rewrite mode
             success = self._execute_task(task_spec)
             
             if success:
                 # Commit and push
-                branch_name = f"agent/{self.task_id}"
-                self._commit_and_push(branch_name)
+                branch_name = f"agent/{self.task_id}-{self.attempt_id}"
+                commit_sha = self._commit_and_push(branch_name)
                 
-                # Create PR (placeholder)
-                pr_url = self._create_pr(branch_name)
+                # Create PR
+                pr_url, pr_number = self._create_pr(branch_name, task_spec)
                 
                 # Emit success events
                 self._emit_event("attempt.succeeded", {
@@ -125,17 +129,18 @@ class Worker:
                     'status': 'succeeded',
                     'completed_at': datetime.utcnow().isoformat(),
                     'branch_name': branch_name,
-                    'pr_url': pr_url
+                    'commit_sha': commit_sha,
+                    'pr_url': pr_url,
+                    'pr_number': pr_number
                 })
                 
-                if pr_url:
-                    self._emit_event("pr.created", {
-                        'attempt_id': self.attempt_id,
-                        'pr_url': pr_url,
-                        'title': f"Task {self.task_id}",
-                        'state': 'open'
-                        # pr_number omitted for placeholder PRs
-                    })
+                self._emit_event("pr.created", {
+                    'attempt_id': self.attempt_id,
+                    'pr_url': pr_url,
+                    'pr_number': pr_number,
+                    'title': f"Leviathan: {task_spec.get('title', self.task_id)}",
+                    'state': 'open'
+                })
                 
                 # Post event bundle
                 self._post_event_bundle()
@@ -207,30 +212,28 @@ class Worker:
         """
         Load task specification from backlog.
         
-        For now, returns placeholder. In full implementation, would:
-        - Load .leviathan/backlog.yaml
-        - Find task by task_id
-        - Return task spec
+        Returns:
+            Task specification dict
         """
-        return {
-            'task_id': self.task_id,
-            'title': 'Placeholder task',
-            'scope': 'test',
-            'priority': 'high',
-            'estimated_size': 'small',
-            'allowed_paths': [],
-            'acceptance_criteria': []
-        }
+        backlog_path = self.target_dir / ".leviathan" / "backlog.yaml"
+        
+        if not backlog_path.exists():
+            raise WorkerError(f"Backlog not found: {backlog_path}")
+        
+        with open(backlog_path, 'r') as f:
+            backlog_data = yaml.safe_load(f)
+        
+        # Find task by ID
+        tasks = backlog_data.get('tasks', [])
+        for task in tasks:
+            if task.get('id') == self.task_id:
+                return task
+        
+        raise WorkerError(f"Task {self.task_id} not found in backlog")
     
     def _execute_task(self, task_spec: Dict[str, Any]) -> bool:
         """
-        Execute task.
-        
-        For now, creates a placeholder log artifact. In full implementation, would:
-        - Use rewrite mode to generate code changes
-        - Run targeted tests
-        - Use repair loop to converge
-        - Capture all artifacts (logs, test outputs, model outputs, diffs)
+        Execute task using rewrite mode.
         
         Args:
             task_spec: Task specification
@@ -238,64 +241,87 @@ class Worker:
         Returns:
             True if successful
         """
-        print(f"Executing task: {task_spec['title']}")
+        print(f"Executing task: {task_spec.get('title', 'Unknown')}")
+        print(f"Scope: {task_spec.get('scope', 'Unknown')}")
+        print(f"Allowed paths: {len(task_spec.get('allowed_paths', []))} file(s)")
         
-        # Create placeholder log artifact
-        log_content = f"""Worker execution log for {self.attempt_id}
+        # Initialize model client
+        model = ModelClient(repo_root=self.target_dir)
+        
+        # Use rewrite mode for task execution
+        try:
+            print("\nGenerating implementation using rewrite mode...")
+            written_paths, source = model.generate_implementation_rewrite_mode(
+                task_spec,
+                retry_context=None
+            )
+            print(f"✓ Implementation generated via {source}")
+            print(f"  Files written: {len(written_paths)}")
+            
+            # Store execution log
+            log_content = f"""Worker execution log for {self.attempt_id}
 
-Task: {task_spec['title']}
-Scope: {task_spec['scope']}
+Task: {task_spec.get('title', 'Unknown')}
+Scope: {task_spec.get('scope', 'Unknown')}
+Allowed paths: {task_spec.get('allowed_paths', [])}
 
-This is a placeholder execution.
-In full implementation, this would:
-1. Generate code changes using rewrite mode
-2. Run targeted tests
-3. Use repair loop to converge
-4. Capture all artifacts
+Execution:
+- Mode: rewrite
+- Source: {source}
+- Files written: {len(written_paths)}
+- Paths: {written_paths}
 
-Status: Simulated success
+Status: Success
 """
-        
-        log_artifact_meta = self.artifact_store.store(
-            log_content.encode('utf-8'),
-            "log",
-            metadata={
+            
+            log_artifact_meta = self.artifact_store.store(
+                log_content.encode('utf-8'),
+                "log",
+                metadata={
+                    'attempt_id': self.attempt_id,
+                    'task_id': self.task_id
+                }
+            )
+            
+            self.artifacts.append({
+                'sha256': log_artifact_meta['sha256'],
+                'kind': 'log',
+                'uri': f"file://{log_artifact_meta['storage_path']}",
+                'size': log_artifact_meta['size_bytes']
+            })
+            
+            # Emit artifact.created event
+            self._emit_event("artifact.created", {
+                'artifact_id': f"artifact-{uuid.uuid4().hex[:8]}",
                 'attempt_id': self.attempt_id,
-                'task_id': self.task_id
-            }
-        )
-        
-        self.artifacts.append({
-            'sha256': log_artifact_meta['sha256'],
-            'kind': 'log',
-            'uri': f"file://{log_artifact_meta['storage_path']}",
-            'size': log_artifact_meta['size_bytes']
-        })
-        
-        # Emit artifact.created event
-        self._emit_event("artifact.created", {
-            'artifact_id': f"artifact-{uuid.uuid4().hex[:8]}",
-            'node_id': f"artifact-{uuid.uuid4().hex[:8]}",
-            'node_type': 'Artifact',
-            'attempt_id': self.attempt_id,
-            'sha256': log_artifact_meta['sha256'],
-            'artifact_type': 'log',
-            'size_bytes': log_artifact_meta['size_bytes'],
-            'storage_path': log_artifact_meta['storage_path'],
-            'created_at': datetime.utcnow().isoformat()
-        })
-        
-        print("✓ Task execution completed")
-        return True
+                'sha256': log_artifact_meta['sha256'],
+                'artifact_type': 'log',
+                'size_bytes': log_artifact_meta['size_bytes'],
+                'storage_path': log_artifact_meta['storage_path'],
+                'created_at': datetime.utcnow().isoformat()
+            })
+            
+            print("✓ Task execution completed")
+            return True
+            
+        except RewriteModeError as e:
+            print(f"✗ Rewrite mode failed: {e}")
+            return False
+        except Exception as e:
+            print(f"✗ Task execution failed: {e}")
+            return False
     
-    def _commit_and_push(self, branch_name: str):
+    def _commit_and_push(self, branch_name: str) -> str:
         """
         Commit changes and push branch.
         
         Args:
             branch_name: Branch name to create
+            
+        Returns:
+            Commit SHA
         """
-        print(f"Committing and pushing branch: {branch_name}")
+        print(f"\nCommitting and pushing branch: {branch_name}")
         
         # Configure git
         subprocess.run(
@@ -316,11 +342,6 @@ Status: Simulated success
             check=True
         )
         
-        # In full implementation, would have actual changes to commit
-        # For now, create a placeholder file
-        placeholder_file = self.target_dir / ".leviathan-attempt"
-        placeholder_file.write_text(f"Attempt {self.attempt_id}\n")
-        
         # Stage and commit
         subprocess.run(
             ["git", "add", "."],
@@ -333,28 +354,187 @@ Status: Simulated success
             check=True
         )
         
-        # Push (would use GitHub token in URL)
-        # For now, skip actual push in placeholder
-        print("✓ Branch created (push skipped in placeholder)")
+        # Get commit SHA
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.target_dir,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        commit_sha = result.stdout.strip()
+        
+        # Push with token authentication
+        if not self.github_token:
+            raise WorkerError("GITHUB_TOKEN required for push")
+        
+        # Build authenticated remote URL
+        repo_url = self._build_authenticated_url(self.target_repo_url, self.github_token)
+        
+        print("Pushing to remote...")
+        subprocess.run(
+            ["git", "push", repo_url, branch_name],
+            cwd=self.target_dir,
+            check=True,
+            capture_output=True  # Suppress token in output
+        )
+        
+        print(f"✓ Branch pushed: {branch_name}")
+        print(f"✓ Commit SHA: {commit_sha}")
+        return commit_sha
     
-    def _create_pr(self, branch_name: str) -> str:
+    def _build_authenticated_url(self, repo_url: str, token: str) -> str:
         """
-        Create pull request.
+        Build authenticated GitHub URL with token.
+        
+        Args:
+            repo_url: Original repository URL
+            token: GitHub token
+            
+        Returns:
+            Authenticated URL (token not logged)
+        """
+        # Convert SSH to HTTPS if needed
+        if repo_url.startswith("git@github.com:"):
+            repo_url = repo_url.replace("git@github.com:", "https://github.com/")
+        
+        # Inject token
+        if "https://" in repo_url:
+            return repo_url.replace("https://", f"https://x-access-token:{token}@")
+        
+        return repo_url
+    
+    def _extract_repo_info(self, repo_url: str) -> Tuple[str, str]:
+        """
+        Extract owner and repo name from GitHub URL.
+        
+        Args:
+            repo_url: Repository URL
+            
+        Returns:
+            Tuple of (owner, repo)
+        """
+        # Handle both HTTPS and SSH URLs
+        if "github.com" in repo_url:
+            # Extract owner/repo from URL
+            match = re.search(r'github\.com[:/]([^/]+)/([^/.]+)', repo_url)
+            if match:
+                return match.group(1), match.group(2)
+        
+        raise WorkerError(f"Could not parse GitHub repo from URL: {repo_url}")
+    
+    def _create_pr(self, branch_name: str, task_spec: Dict[str, Any]) -> Tuple[str, int]:
+        """
+        Create pull request using GitHub API.
         
         Args:
             branch_name: Branch name
+            task_spec: Task specification
             
         Returns:
-            PR URL
+            Tuple of (pr_url, pr_number)
         """
-        print("Creating pull request...")
+        print("\nCreating pull request...")
         
-        # In full implementation, would use GitHub API to create PR
-        # For now, return placeholder URL
-        pr_url = f"https://github.com/org/{self.target_name}/pull/123"
+        if not self.github_token:
+            raise WorkerError("GITHUB_TOKEN required for PR creation")
+        
+        # Extract repo info
+        owner, repo = self._extract_repo_info(self.target_repo_url)
+        
+        # Build PR title and body
+        title = f"Leviathan: {task_spec.get('title', self.task_id)}"
+        body = f"""Automated PR from Leviathan
+
+**Task ID:** {self.task_id}
+**Attempt ID:** {self.attempt_id}
+**Scope:** {task_spec.get('scope', 'Unknown')}
+
+**Acceptance Criteria:**
+{self._format_acceptance_criteria(task_spec.get('acceptance_criteria', []))}
+
+---
+*This PR was automatically generated by Leviathan*
+"""
+        
+        # Check if PR already exists for this branch
+        existing_pr = self._get_existing_pr(owner, repo, branch_name)
+        if existing_pr:
+            pr_number = existing_pr['number']
+            pr_url = existing_pr['html_url']
+            print(f"✓ PR already exists: {pr_url}")
+            print(f"✓ PR number: {pr_number}")
+            return pr_url, pr_number
+        
+        # Create new PR
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls"
+        headers = {
+            "Authorization": f"Bearer {self.github_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+        }
+        data = {
+            "title": title,
+            "body": body,
+            "head": branch_name,
+            "base": self.target_branch
+        }
+        
+        response = requests.post(api_url, json=data, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        pr_data = response.json()
+        pr_url = pr_data['html_url']
+        pr_number = pr_data['number']
         
         print(f"✓ PR created: {pr_url}")
-        return pr_url
+        print(f"✓ PR number: {pr_number}")
+        return pr_url, pr_number
+    
+    def _get_existing_pr(self, owner: str, repo: str, branch_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Check if PR already exists for branch.
+        
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            branch_name: Branch name
+            
+        Returns:
+            PR data if exists, None otherwise
+        """
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls"
+        headers = {
+            "Authorization": f"Bearer {self.github_token}",
+            "Accept": "application/vnd.github+json"
+        }
+        params = {
+            "head": f"{owner}:{branch_name}",
+            "state": "open"
+        }
+        
+        try:
+            response = requests.get(api_url, headers=headers, params=params, timeout=30)
+            response.raise_for_status()
+            prs = response.json()
+            return prs[0] if prs else None
+        except Exception:
+            return None
+    
+    def _format_acceptance_criteria(self, criteria: List[str]) -> str:
+        """
+        Format acceptance criteria as markdown list.
+        
+        Args:
+            criteria: List of acceptance criteria
+            
+        Returns:
+            Formatted markdown string
+        """
+        if not criteria:
+            return "*No acceptance criteria specified*"
+        
+        return "\n".join(f"- {c}" for c in criteria)
     
     def _emit_event(self, event_type: str, payload: Dict[str, Any]):
         """

@@ -7,9 +7,15 @@ Complete guide for running Leviathan with Kubernetes Job execution.
 The K8s executor submits ephemeral Jobs to a Kubernetes cluster. Each Job:
 1. Runs the worker container
 2. Clones target repo
-3. Executes one task attempt
-4. Posts event bundle to control plane API
-5. Exits
+3. Loads task from `.leviathan/backlog.yaml`
+4. Executes task using rewrite mode (real code generation)
+5. Commits changes to branch `agent/<task_id>-<attempt_id>`
+6. Pushes branch to GitHub using token authentication
+7. Creates pull request via GitHub API
+8. Posts event bundle to control plane API (includes PR number, URL, commit SHA)
+9. Exits
+
+**Success requires a real PR**: The worker must successfully create a GitHub PR with a valid PR number and URL. Placeholder PRs are not accepted.
 
 ## Prerequisites
 
@@ -94,6 +100,22 @@ python3 -m leviathan.control_plane \
   --once \
   --executor k8s
 ```
+
+### Branch Naming Convention
+
+Worker creates branches with collision-safe naming:
+```
+agent/<task_id>-<attempt_id>
+```
+
+Examples:
+- `agent/task-001-attempt-abc123`
+- `agent/fix-login-attempt-def456`
+
+This ensures:
+- Each attempt gets a unique branch
+- Retries don't collide with previous attempts
+- Branch names are traceable to specific attempts
 
 ### What Gets Deployed
 

@@ -12,10 +12,7 @@ from pathlib import Path
 from datetime import datetime
 from fastapi.testclient import TestClient
 
-# Set test token before importing API
-os.environ["LEVIATHAN_CONTROL_PLANE_TOKEN"] = "test-token-12345"
-os.environ["LEVIATHAN_BACKEND"] = "ndjson"
-
+# Token is set by conftest.py before module import
 from leviathan.control_plane.api import app
 from leviathan.graph.events import EventType
 

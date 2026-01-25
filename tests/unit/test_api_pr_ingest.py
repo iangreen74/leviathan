@@ -12,16 +12,14 @@ from leviathan.graph.store import GraphStore
 @pytest.fixture
 def client():
     """Create test client."""
-    import os
-    # Set required env var for API
-    os.environ["LEVIATHAN_CONTROL_PLANE_TOKEN"] = "test-token-123"
+    # Token is set by conftest.py
     return TestClient(app)
 
 
 @pytest.fixture
 def auth_token():
     """Get auth token from environment or use test token."""
-    return "test-token-123"
+    return "test-token-12345"
 
 
 class TestAPIEventIngestPR:

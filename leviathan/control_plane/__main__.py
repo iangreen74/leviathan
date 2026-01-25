@@ -18,6 +18,7 @@ from leviathan.artifacts.store import ArtifactStore
 from leviathan.control_plane.scheduler import Scheduler, RetryPolicy
 from leviathan.executors.local_worktree import LocalWorktreeExecutor
 from leviathan.executors.k8s_stub import K8sExecutorStub
+from leviathan.executors.k8s_executor import K8sExecutor
 
 
 def resolve_target_config(target_arg: str) -> dict:
@@ -104,9 +105,9 @@ def main():
     )
     parser.add_argument(
         "--executor",
-        choices=["local", "k8s-stub"],
+        choices=["local", "k8s", "k8s-stub"],
         default="local",
-        help="Executor type (default: local)"
+        help="Executor type: local (worktree), k8s (real K8s Jobs), k8s-stub (mock K8s)"
     )
     parser.add_argument(
         "--max-attempts",
@@ -141,7 +142,12 @@ def main():
     artifact_store = ArtifactStore()
     
     # Initialize executor
-    if args.executor == "k8s-stub":
+    if args.executor == "k8s":
+        executor = K8sExecutor(
+            namespace="leviathan",
+            artifact_store=artifact_store
+        )
+    elif args.executor == "k8s-stub":
         executor = K8sExecutorStub()
     else:
         executor = LocalWorktreeExecutor(artifact_store=artifact_store)

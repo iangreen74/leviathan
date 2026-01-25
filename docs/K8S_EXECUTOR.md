@@ -89,7 +89,7 @@ source ~/.leviathan/env
 export LEVIATHAN_CONTROL_PLANE_TOKEN=$(cat ~/.leviathan/control-plane-token)
 
 # Run scheduler with K8s executor
-python3 -m leviathan.control_plane.scheduler \
+python3 -m leviathan.control_plane \
   --target <target-name> \
   --once \
   --executor k8s

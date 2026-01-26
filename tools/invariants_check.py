@@ -254,6 +254,55 @@ class InvariantsChecker:
         if not self.failures:
             print("✓ Namespace consistency valid")
     
+    def check_topology_artifacts(self):
+        """Validate topology artifact names are defined."""
+        print("\n=== Checking Topology Artifacts ===")
+        
+        topo_inv = self.invariants.get('topology', {})
+        artifact_names = topo_inv.get('artifact_names', [])
+        
+        # Check that artifact names are referenced in topology indexer
+        indexer_file = self.repo_root / "leviathan" / "topology" / "indexer.py"
+        
+        if not indexer_file.exists():
+            self.fail("Topology indexer not found: leviathan/topology/indexer.py")
+            return
+        
+        with open(indexer_file, 'r') as f:
+            content = f.read()
+        
+        for artifact_name in artifact_names:
+            if artifact_name not in content:
+                self.fail(f"Topology artifact '{artifact_name}' not found in indexer code")
+        
+        if not self.failures:
+            print("✓ Topology artifacts valid")
+    
+    def check_topology_api_endpoints(self):
+        """Validate topology API endpoints exist."""
+        print("\n=== Checking Topology API Endpoints ===")
+        
+        topo_inv = self.invariants.get('topology', {})
+        endpoints = topo_inv.get('api_endpoints', [])
+        
+        # Check that endpoints are defined in control plane API
+        api_file = self.repo_root / "leviathan" / "control_plane" / "api.py"
+        
+        if not api_file.exists():
+            self.fail("Control plane API not found: leviathan/control_plane/api.py")
+            return
+        
+        with open(api_file, 'r') as f:
+            content = f.read()
+        
+        for endpoint in endpoints:
+            # Check for @app.get decorator with endpoint path
+            if f'@app.get("{endpoint}"' not in content:
+                self.fail(f"Topology API endpoint '{endpoint}' not found in control plane")
+        
+        if not self.failures:
+            print("✓ Topology API endpoints valid")
+    
     def run_all_checks(self) -> bool:
         """Run all invariant checks."""
         print("Leviathan Invariants Gate")
@@ -264,6 +313,8 @@ class InvariantsChecker:
         self.check_ci_workflows()
         self.check_requirements()
         self.check_namespace_consistency()
+        self.check_topology_artifacts()
+        self.check_topology_api_endpoints()
         
         print("\n" + "=" * 60)
         

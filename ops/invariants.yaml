@@ -61,3 +61,24 @@ ci:
     - pytest
     - pyyaml
     - httpx
+
+topology:
+  artifact_names:
+    - topo_areas.json
+    - topo_subsystems.json
+    - topo_deps.json
+    - topo_summary.json
+  
+  event_types:
+    - topo.started
+    - topo.area.discovered
+    - topo.subsystem.discovered
+    - topo.dependency.discovered
+    - topo.indexed
+    - topo.completed
+  
+  api_endpoints:
+    - /v1/topology/summary
+    - /v1/topology/areas
+    - /v1/topology/subsystems
+    - /v1/topology/dependencies

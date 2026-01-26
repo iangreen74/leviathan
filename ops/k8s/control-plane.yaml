@@ -16,6 +16,8 @@ kind: Deployment
 metadata:
   name: leviathan-control-plane
   namespace: leviathan
+  labels:
+    app: leviathan-control-plane
 spec:
   replicas: 1
   selector:
@@ -27,8 +29,9 @@ spec:
         app: leviathan-control-plane
     spec:
       containers:
-        - name: api
-          image: leviathan-worker:local
+        - name: control-plane
+          image: leviathan-control-plane:local
+          imagePullPolicy: IfNotPresent
           command: ["python", "-m", "leviathan.control_plane.api"]
           env:
             - name: LEVIATHAN_CONTROL_PLANE_BACKEND

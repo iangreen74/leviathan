@@ -1,0 +1,63 @@
+# Leviathan Invariants - Single Source of Truth
+#
+# This file defines canonical configuration truths that MUST NOT drift.
+# Changes to this file require explicit PR review.
+# Validated by tools/invariants_check.py in CI.
+
+kubernetes:
+  namespace: leviathan
+  
+  control_plane:
+    service_name: leviathan-control-plane
+    port: 8000
+    container_name: control-plane
+    image_name: leviathan-control-plane
+    labels:
+      app: leviathan-control-plane
+    selectors:
+      app: leviathan-control-plane
+  
+  worker:
+    container_name: worker
+    image_name: leviathan-worker
+    job_labels:
+      app: leviathan
+      # Dynamic labels per job:
+      # target: <target_name>
+      # task: <task_id>
+      # attempt: <attempt_id>
+
+images:
+  local_dev:
+    tag_suffix: ":local"
+    pull_policy: IfNotPresent
+  
+  production:
+    # Immutable tags required - no ":latest" allowed
+    forbidden_tags:
+      - ":latest"
+
+secrets:
+  control_plane:
+    secret_name: leviathan-secrets
+    required_keys:
+      - control-plane-token
+  
+  worker:
+    secret_name: leviathan-secrets
+    required_env_vars:
+      - CONTROL_PLANE_URL
+      - CONTROL_PLANE_TOKEN
+      - GITHUB_TOKEN
+      - LEVIATHAN_CLAUDE_API_KEY
+      - LEVIATHAN_CLAUDE_MODEL
+
+ci:
+  required_checks:
+    - invariants_check
+    - unit_tests
+  
+  required_dependencies:
+    - pytest
+    - pyyaml
+    - httpx

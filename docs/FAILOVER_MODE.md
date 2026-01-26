@@ -92,19 +92,21 @@ LEVIATHAN_ARTIFACT_S3_PREFIX=artifacts  # optional
 ```bash
 # Local Leviathan writing to AWS services
 LEVIATHAN_CONTROL_PLANE_BACKEND=postgres
-LEVIATHAN_POSTGRES_URL=postgresql://user:pass@rds.us-east-1.amazonaws.com:5432/leviathan
+LEVIATHAN_POSTGRES_URL=postgresql://user:pass@<rds-endpoint>:5432/leviathan
 LEVIATHAN_ARTIFACT_BACKEND=s3
 LEVIATHAN_ARTIFACT_S3_BUCKET=leviathan-prod-artifacts
+AWS_REGION=us-west-2
 ```
 
 **After crash** (AWS standby):
 ```bash
 # Launch EC2 instance with same config + rebuild flag
 LEVIATHAN_CONTROL_PLANE_BACKEND=postgres
-LEVIATHAN_POSTGRES_URL=postgresql://user:pass@rds.us-east-1.amazonaws.com:5432/leviathan
+LEVIATHAN_POSTGRES_URL=postgresql://user:pass@<rds-endpoint>:5432/leviathan
 LEVIATHAN_ARTIFACT_BACKEND=s3
 LEVIATHAN_ARTIFACT_S3_BUCKET=leviathan-prod-artifacts
 LEVIATHAN_REBUILD_ON_START=1  # Rebuild graph from events
+AWS_REGION=us-west-2
 
 # Start control plane
 python3 -m leviathan.control_plane.api
@@ -158,7 +160,7 @@ LEVIATHAN_ARTIFACT_S3_PREFIX=artifacts  # optional, default: artifacts
 # AWS credentials (use IAM role or env vars)
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
-AWS_REGION=us-east-1
+AWS_REGION=us-west-2
 ```
 
 #### Authentication
@@ -214,7 +216,7 @@ aws rds describe-db-instances \
 #### 2. Create S3 Bucket
 
 ```bash
-aws s3 mb s3://leviathan-prod-artifacts --region us-east-1
+aws s3 mb s3://leviathan-prod-artifacts --region us-west-2
 
 # Enable versioning
 aws s3api put-bucket-versioning \
@@ -281,7 +283,6 @@ cd leviathan
 
 # Install dependencies
 pip3 install -r requirements.txt
-pip3 install boto3 psycopg2-binary  # For S3 and Postgres
 ```
 
 #### 5. Configure Environment
@@ -302,7 +303,7 @@ LEVIATHAN_ARTIFACT_S3_PREFIX=artifacts
 LEVIATHAN_REBUILD_ON_START=1
 
 # AWS region
-AWS_REGION=us-east-1
+AWS_REGION=us-west-2
 ```
 
 #### 6. Start Control Plane
@@ -359,7 +360,7 @@ services:
     image: localstack/localstack
     environment:
       SERVICES: s3
-      DEFAULT_REGION: us-east-1
+      DEFAULT_REGION: us-west-2
     ports:
       - "4566:4566"
   

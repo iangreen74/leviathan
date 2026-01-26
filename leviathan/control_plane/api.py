@@ -116,6 +116,34 @@ class BacklogSuggestResponse(BaseModel):
     message: Optional[str] = None
 
 
+class TopologySummaryResponse(BaseModel):
+    """Response for topology summary."""
+    target_id: str
+    commit_sha: Optional[str] = None
+    areas_count: int
+    subsystems_count: int
+    dependencies_count: int
+    flows_count: int
+
+
+class TopologyAreasResponse(BaseModel):
+    """Response for topology areas."""
+    target_id: str
+    areas: List[Dict[str, Any]]
+
+
+class TopologySubsystemsResponse(BaseModel):
+    """Response for topology subsystems."""
+    target_id: str
+    subsystems: List[Dict[str, Any]]
+
+
+class TopologyDependenciesResponse(BaseModel):
+    """Response for topology dependencies."""
+    target_id: str
+    dependencies: List[Dict[str, Any]]
+
+
 # Global state (initialized on startup)
 config: Optional[ControlPlaneConfig] = None
 event_store: Optional[EventStore] = None
@@ -588,6 +616,144 @@ async def backlog_suggest(
     return BacklogSuggestResponse(
         status='not_implemented',
         message='Backlog synthesis endpoint is a placeholder. Full implementation requires scheduler integration.'
+    )
+
+
+@app.get("/v1/topology/summary", response_model=TopologySummaryResponse)
+async def topology_summary(
+    target: str,
+    token: str = Depends(verify_token)
+):
+    """
+    Get topology summary for a target.
+    
+    Returns the most recent topology analysis results.
+    
+    Args:
+        target: Target identifier
+        token: Verified bearer token
+        
+    Returns:
+        Topology summary with counts
+    """
+    if not event_store:
+        raise HTTPException(status_code=500, detail="Event store not initialized")
+    
+    # Find most recent topo.indexed event for target
+    all_events = event_store.get_events()
+    topo_events = [e for e in all_events 
+                   if e.event_type == 'topo.indexed' 
+                   and e.payload.get('target_id') == target]
+    
+    if not topo_events:
+        raise HTTPException(status_code=404, detail=f"No topology data found for target {target}")
+    
+    # Get most recent
+    latest = max(topo_events, key=lambda e: e.timestamp)
+    
+    return TopologySummaryResponse(
+        target_id=target,
+        commit_sha=latest.payload.get('commit_sha'),
+        areas_count=latest.payload.get('areas_count', 0),
+        subsystems_count=latest.payload.get('subsystems_count', 0),
+        dependencies_count=latest.payload.get('dependencies_count', 0),
+        flows_count=0
+    )
+
+
+@app.get("/v1/topology/areas", response_model=TopologyAreasResponse)
+async def topology_areas(
+    target: str,
+    token: str = Depends(verify_token)
+):
+    """
+    Get repository areas for a target.
+    
+    Args:
+        target: Target identifier
+        token: Verified bearer token
+        
+    Returns:
+        List of areas
+    """
+    if not event_store:
+        raise HTTPException(status_code=500, detail="Event store not initialized")
+    
+    # Find all topo.area.discovered events for target
+    all_events = event_store.get_events()
+    area_events = [e for e in all_events 
+                   if e.event_type == 'topo.area.discovered' 
+                   and e.payload.get('target_id') == target]
+    
+    areas = [e.payload for e in area_events]
+    
+    return TopologyAreasResponse(
+        target_id=target,
+        areas=areas
+    )
+
+
+@app.get("/v1/topology/subsystems", response_model=TopologySubsystemsResponse)
+async def topology_subsystems(
+    target: str,
+    token: str = Depends(verify_token)
+):
+    """
+    Get subsystems for a target.
+    
+    Args:
+        target: Target identifier
+        token: Verified bearer token
+        
+    Returns:
+        List of subsystems
+    """
+    if not event_store:
+        raise HTTPException(status_code=500, detail="Event store not initialized")
+    
+    # Find all topo.subsystem.discovered events for target
+    all_events = event_store.get_events()
+    subsystem_events = [e for e in all_events 
+                        if e.event_type == 'topo.subsystem.discovered' 
+                        and e.payload.get('target_id') == target]
+    
+    subsystems = [e.payload for e in subsystem_events]
+    
+    return TopologySubsystemsResponse(
+        target_id=target,
+        subsystems=subsystems
+    )
+
+
+@app.get("/v1/topology/dependencies", response_model=TopologyDependenciesResponse)
+async def topology_dependencies(
+    target: str,
+    token: str = Depends(verify_token)
+):
+    """
+    Get dependencies for a target.
+    
+    Args:
+        target: Target identifier
+        token: Verified bearer token
+        
+    Returns:
+        List of dependencies
+    """
+    if not event_store:
+        raise HTTPException(status_code=500, detail="Event store not initialized")
+    
+    # Find all topo.dependency.discovered events for target
+    all_events = event_store.get_events()
+    dep_events = [e for e in all_events 
+                  if e.event_type == 'topo.dependency.discovered' 
+                  and e.payload.get('target_id') == target]
+    
+    dependencies = [e.payload for e in dep_events]
+    
+    return TopologyDependenciesResponse(
+        target_id=target,
+        dependencies=dependencies
     )
 
 

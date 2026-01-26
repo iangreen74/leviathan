@@ -165,6 +165,87 @@ class LeviathanCLI:
         
         if 'message' in data:
             print(f"\n{data['message']}")
+    
+    def topo_summary(self, target: str) -> None:
+        """Display topology summary for a target."""
+        data = self._get('/v1/topology/summary', params={'target': target})
+        
+        print(f"Topology Summary: {target}")
+        print("=" * 80)
+        print(f"Commit SHA: {data.get('commit_sha', 'unknown')}")
+        print(f"Areas: {data.get('areas_count', 0)}")
+        print(f"Subsystems: {data.get('subsystems_count', 0)}")
+        print(f"Dependencies: {data.get('dependencies_count', 0)}")
+        print(f"Flows: {data.get('flows_count', 0)}")
+    
+    def topo_areas(self, target: str) -> None:
+        """Display repository areas for a target."""
+        data = self._get('/v1/topology/areas', params={'target': target})
+        
+        print(f"Repository Areas: {target}")
+        print("=" * 80)
+        
+        for area in data.get('areas', []):
+            print(f"\n{area['area_id']}")
+            print(f"  Files: {area.get('file_count', 0)}")
+            print(f"  Prefixes: {', '.join(area.get('path_prefixes', []))}")
+    
+    def topo_subsystems(self, target: str) -> None:
+        """Display subsystems for a target."""
+        data = self._get('/v1/topology/subsystems', params={'target': target})
+        
+        print(f"Subsystems: {target}")
+        print("=" * 80)
+        
+        for subsystem in data.get('subsystems', []):
+            print(f"\n{subsystem['subsystem_id']}")
+            print(f"  Root: {subsystem.get('root_path', '')}")
+            print(f"  Area: {subsystem.get('area_id', 'unknown')}")
+            print(f"  Files: {subsystem.get('file_count', 0)}")
+            if subsystem.get('languages'):
+                langs = ', '.join(f"{k}({v:.0%})" for k, v in sorted(subsystem['languages'].items()))
+                print(f"  Languages: {langs}")
+    
+    def topo_deps(self, target: str) -> None:
+        """Display dependencies for a target."""
+        data = self._get('/v1/topology/dependencies', params={'target': target})
+        
+        print(f"Dependencies: {target}")
+        print("=" * 80)
+        
+        for dep in data.get('dependencies', []):
+            print(f"\n{dep['from_subsystem_id']} -> {dep['to_subsystem_id']}")
+            print(f"  Evidence: {len(dep.get('evidence', []))} signal(s)")
+            for evidence in dep.get('evidence', [])[:3]:  # Show first 3
+                print(f"    - {evidence.get('kind', 'unknown')}: {evidence.get('from_file', '')}")
+    
+    def topo_dot(self, target: str) -> None:
+        """Generate GraphViz DOT output for topology."""
+        # Get subsystems and dependencies
+        subsystems_data = self._get('/v1/topology/subsystems', params={'target': target})
+        deps_data = self._get('/v1/topology/dependencies', params={'target': target})
+        
+        print("digraph topology {")
+        print("  rankdir=LR;")
+        print("  node [shape=box];")
+        print()
+        
+        # Nodes
+        for subsystem in sorted(subsystems_data.get('subsystems', []), key=lambda s: s['subsystem_id']):
+            sid = subsystem['subsystem_id'].replace('/', '_').replace('-', '_')
+            label = subsystem['subsystem_id'].replace('subsystem/', '')
+            print(f'  {sid} [label="{label}"];')
+        
+        print()
+        
+        # Edges
+        for dep in sorted(deps_data.get('dependencies', []), key=lambda d: (d['from_subsystem_id'], d['to_subsystem_id'])):
+            from_id = dep['from_subsystem_id'].replace('/', '_').replace('-', '_')
+            to_id = dep['to_subsystem_id'].replace('/', '_').replace('-', '_')
+            evidence_count = len(dep.get('evidence', []))
+            print(f'  {from_id} -> {to_id} [label="{evidence_count}"];')
+        
+        print("}")
 
 
 def main():
@@ -214,6 +295,26 @@ def main():
     backlog_suggest_parser = subparsers.add_parser('backlog-suggest', help='Generate backlog task proposals for a target')
     backlog_suggest_parser.add_argument('target', help='Target name (e.g., radix)')
     
+    # topo-summary
+    topo_summary_parser = subparsers.add_parser('topo-summary', help='Display topology summary for a target')
+    topo_summary_parser.add_argument('--target', required=True, help='Target name')
+    
+    # topo-areas
+    topo_areas_parser = subparsers.add_parser('topo-areas', help='Display repository areas for a target')
+    topo_areas_parser.add_argument('--target', required=True, help='Target name')
+    
+    # topo-subsystems
+    topo_subsystems_parser = subparsers.add_parser('topo-subsystems', help='Display subsystems for a target')
+    topo_subsystems_parser.add_argument('--target', required=True, help='Target name')
+    
+    # topo-deps
+    topo_deps_parser = subparsers.add_parser('topo-deps', help='Display dependencies for a target')
+    topo_deps_parser.add_argument('--target', required=True, help='Target name')
+    
+    # topo-dot
+    topo_dot_parser = subparsers.add_parser('topo-dot', help='Generate GraphViz DOT output for topology')
+    topo_dot_parser.add_argument('--target', required=True, help='Target name')
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -240,6 +341,16 @@ def main():
             cli.invalidate_attempt(args.attempt_id, args.reason)
         elif args.command == 'backlog-suggest':
             cli.backlog_suggest(args.target)
+        elif args.command == 'topo-summary':
+            cli.topo_summary(args.target)
+        elif args.command == 'topo-areas':
+            cli.topo_areas(args.target)
+        elif args.command == 'topo-subsystems':
+            cli.topo_subsystems(args.target)
+        elif args.command == 'topo-deps':
+            cli.topo_deps(args.target)
+        elif args.command == 'topo-dot':
+            cli.topo_dot(args.target)
         else:
             parser.print_help()
             sys.exit(1)

@@ -38,6 +38,7 @@ from leviathan.rewrite_mode import RewriteModeError
 from leviathan.backlog import Task
 from leviathan.backlog_loader import load_backlog_tasks
 from leviathan.bootstrap.indexer import RepositoryIndexer, load_bootstrap_config
+from leviathan.topology.indexer import TopologyIndexer
 
 
 class WorkerError(Exception):
@@ -115,22 +116,29 @@ class Worker:
             # Load task spec from backlog
             task_spec = self._load_task_spec()
             
-            # Check if this is a bootstrap task
+            # Check task type
             is_bootstrap = (
                 task_spec.scope == "bootstrap" or 
                 self.task_id.startswith("bootstrap-")
+            )
+            is_topology = (
+                task_spec.scope == "topology" or
+                self.task_id.startswith("topology-")
             )
             
             if is_bootstrap:
                 # Execute bootstrap (deterministic, no model calls)
                 success = self._execute_bootstrap(task_spec)
+            elif is_topology:
+                # Execute topology (deterministic, no model calls)
+                success = self._execute_topology(task_spec)
             else:
                 # Execute task using rewrite mode
                 success = self._execute_task(task_spec)
             
             if success:
-                if is_bootstrap:
-                    # Bootstrap tasks don't create PRs (read-only)
+                if is_bootstrap or is_topology:
+                    # Bootstrap/topology tasks don't create PRs (read-only)
                     self._emit_event("attempt.succeeded", {
                         'attempt_id': self.attempt_id,
                         'status': 'succeeded',
@@ -440,6 +448,95 @@ Status: Success
         
         except Exception as e:
             print(f"✗ Bootstrap error: {e}")
+            return False
+    
+    def _execute_topology(self, task_spec: Task) -> bool:
+        """
+        Execute topology indexing (deterministic, no model calls).
+        
+        Args:
+            task_spec: Task specification
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            print("\n=== Topology Indexing ===")
+            print(f"Target: {self.target_name}")
+            print(f"Repository: {self.target_repo_url}")
+            
+            # Get current commit SHA
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=self.target_dir,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            commit_sha = result.stdout.strip()
+            
+            # Create topology indexer
+            indexer = TopologyIndexer(
+                repo_path=self.target_dir,
+                target_id=self.target_name,
+                commit_sha=commit_sha
+            )
+            
+            # Run topology analysis
+            print("\nAnalyzing repository topology...")
+            result = indexer.index()
+            
+            # Add events to worker's event list
+            print(f"\n✓ Topology analysis complete")
+            print(f"  - Areas: {result['summary']['areas_count']}")
+            print(f"  - Subsystems: {result['summary']['subsystems_count']}")
+            print(f"  - Dependencies: {result['summary']['dependencies_count']}")
+            
+            # Store all events
+            for event in result['events']:
+                self.events.append(event)
+            
+            # Store artifacts
+            for artifact_name, artifact_content in result['artifacts'].items():
+                artifact_meta = self.artifact_store.store(
+                    artifact_content.encode('utf-8'),
+                    "topology",
+                    metadata={
+                        'attempt_id': self.attempt_id,
+                        'task_id': self.task_id,
+                        'artifact_name': artifact_name
+                    }
+                )
+                
+                self.artifacts.append({
+                    'sha256': artifact_meta['sha256'],
+                    'kind': 'topology',
+                    'uri': f"file://{artifact_meta['storage_path']}",
+                    'size': artifact_meta['size_bytes'],
+                    'name': artifact_name
+                })
+                
+                print(f"  - Artifact: {artifact_name} ({artifact_meta['size_bytes']} bytes)")
+            
+            # Emit artifact.created events
+            for artifact in self.artifacts:
+                self._emit_event("artifact.created", {
+                    'artifact_id': f"artifact-{uuid.uuid4().hex[:8]}",
+                    'attempt_id': self.attempt_id,
+                    'sha256': artifact['sha256'],
+                    'artifact_type': artifact['kind'],
+                    'size_bytes': artifact['size'],
+                    'storage_path': artifact['uri'],
+                    'name': artifact.get('name', '')
+                })
+            
+            print("\n✓ Topology completed successfully")
+            return True
+        
+        except Exception as e:
+            print(f"✗ Topology error: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def _commit_and_push(self, branch_name: str) -> str:

@@ -101,8 +101,12 @@ class TestWorkerBootstrapExecution:
             call_args = mock_post.call_args
             bundle = call_args[1]['json']
             
-            # Check that bootstrap events are present
+            # Debug: print all event types
             event_types = [e['event_type'] for e in bundle['events']]
+            print(f"\nDEBUG: Event types in bundle: {event_types}")
+            print(f"DEBUG: Total events: {len(bundle['events'])}")
+            
+            # Check that bootstrap events are present
             assert 'bootstrap.started' in event_types
             assert 'bootstrap.completed' in event_types
             assert 'repo.indexed' in event_types

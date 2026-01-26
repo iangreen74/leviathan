@@ -238,9 +238,12 @@ def initialize_stores(ndjson_dir: Optional[str] = None, artifacts_dir: Optional[
         event_store = EventStore(backend="postgres", postgres_url=config.postgres_url)
         graph_store = GraphStore(backend="postgres", postgres_url=config.postgres_url)
     else:
-        # Use override directory for tests, or default from config
-        store_dir = ndjson_dir if ndjson_dir else config.ndjson_dir
-        event_store = EventStore(backend="ndjson", ndjson_dir=store_dir)
+        # Use override directory for tests, or let EventStore use its default
+        if ndjson_dir:
+            event_store = EventStore(backend="ndjson", ndjson_dir=ndjson_dir)
+        else:
+            # Let EventStore use default (~/.leviathan/graph/events.ndjson)
+            event_store = EventStore(backend="ndjson")
         graph_store = GraphStore(backend="memory")
     
     # Use override directory for tests, or default from config

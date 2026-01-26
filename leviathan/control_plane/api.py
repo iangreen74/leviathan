@@ -98,9 +98,22 @@ class InvalidateRequest(BaseModel):
 
 class InvalidateResponse(BaseModel):
     """Response for invalidation."""
+    status: str
     attempt_id: str
-    invalidated: bool
-    reason: str
+
+
+class BacklogSuggestRequest(BaseModel):
+    """Request to generate backlog suggestions."""
+    target: str
+
+
+class BacklogSuggestResponse(BaseModel):
+    """Response for backlog suggestion."""
+    status: str
+    attempt_id: Optional[str] = None
+    pr_url: Optional[str] = None
+    tasks_proposed: Optional[int] = None
+    message: Optional[str] = None
 
 
 # Global state (initialized on startup)
@@ -534,9 +547,47 @@ async def invalidate_attempt(
     event_store.append(invalidation_event)
     
     return InvalidateResponse(
-        attempt_id=attempt_id,
-        invalidated=True,
-        reason=request.reason
+        status='invalidated',
+        attempt_id=attempt_id
+    )
+
+
+@app.post("/v1/backlog/suggest", response_model=BacklogSuggestResponse)
+async def backlog_suggest(
+    request: BacklogSuggestRequest,
+    token: str = Depends(verify_token)
+):
+    """
+    Generate backlog task proposals for a target.
+    
+    This endpoint triggers a backlog synthesis process that:
+    1. Finds the most recent successful bootstrap attempt for the target
+    2. Loads bootstrap artifacts (repo_manifest, workflows, api_routes)
+    3. Loads current backlog and policy from target repo
+    4. Generates proposed tasks using LLM
+    5. Creates a PR with the proposed tasks
+    
+    Args:
+        request: Backlog suggestion request with target name
+        token: Verified bearer token
+        
+    Returns:
+        Backlog suggestion response with attempt ID and PR URL
+    """
+    if not event_store or not graph_store:
+        raise HTTPException(status_code=500, detail="Stores not initialized")
+    
+    # This is a placeholder - full implementation would:
+    # 1. Query graph for most recent successful bootstrap attempt
+    # 2. Load artifacts from artifact store
+    # 3. Clone target repo to get current backlog/policy
+    # 4. Run BacklogSynthesizer
+    # 5. Create PR with proposed tasks
+    # 6. Return response with PR URL
+    
+    return BacklogSuggestResponse(
+        status='not_implemented',
+        message='Backlog synthesis endpoint is a placeholder. Full implementation requires scheduler integration.'
     )
 
 

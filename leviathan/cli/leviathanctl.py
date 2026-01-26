@@ -137,7 +137,34 @@ class LeviathanCLI:
         
         print(f"Invalidated attempt: {attempt_id}")
         print(f"Reason: {reason}")
-        print(f"Response: {json.dumps(data, indent=2)}")
+        print(f"Status: {data.get('status', 'unknown')}")
+    
+    def backlog_suggest(self, target: str) -> None:
+        """
+        Generate and propose backlog tasks for a target.
+        
+        Creates a PR with proposed tasks based on bootstrap artifacts.
+        """
+        # Trigger backlog suggestion via API
+        data = self._post('/v1/backlog/suggest', {
+            'target': target
+        })
+        
+        print(f"Backlog Suggestion for {target}")
+        print("=" * 80)
+        print(f"Status: {data.get('status', 'unknown')}")
+        
+        if 'attempt_id' in data:
+            print(f"Attempt ID: {data['attempt_id']}")
+        
+        if 'pr_url' in data:
+            print(f"PR URL: {data['pr_url']}")
+        
+        if 'tasks_proposed' in data:
+            print(f"Tasks Proposed: {data['tasks_proposed']}")
+        
+        if 'message' in data:
+            print(f"\n{data['message']}")
 
 
 def main():
@@ -183,6 +210,10 @@ def main():
     invalidate_parser.add_argument('attempt_id', help='Attempt ID to invalidate')
     invalidate_parser.add_argument('--reason', required=True, help='Reason for invalidation')
     
+    # backlog-suggest
+    backlog_suggest_parser = subparsers.add_parser('backlog-suggest', help='Generate backlog task proposals for a target')
+    backlog_suggest_parser.add_argument('target', help='Target name (e.g., radix)')
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -207,6 +238,8 @@ def main():
             cli.failures_recent(target=args.target, limit=args.limit)
         elif args.command == 'invalidate':
             cli.invalidate_attempt(args.attempt_id, args.reason)
+        elif args.command == 'backlog-suggest':
+            cli.backlog_suggest(args.target)
         else:
             parser.print_help()
             sys.exit(1)

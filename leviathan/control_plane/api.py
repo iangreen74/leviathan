@@ -244,16 +244,22 @@ async def ingest_events(
     
     # Append events to event store
     for event_data in request.events:
-        # Convert dict to Event object
-        event = Event(**event_data)
-        
-        # Append to event store (hash chain computed automatically)
-        event_store.append_event(event)
-        
-        # Apply to graph projection
-        graph_store.apply_event(event)
-        
-        ingested_count += 1
+        try:
+            # Convert dict to Event object
+            event = Event(**event_data)
+            
+            # Append to event store (hash chain computed automatically)
+            event_store.append_event(event)
+            
+            # Apply to graph projection
+            graph_store.apply_event(event)
+            
+            ingested_count += 1
+        except Exception as e:
+            print(f"Error ingesting event {event_data.get('event_id', 'unknown')}: {e}")
+            print(f"Event data: {event_data}")
+            # Continue processing other events instead of failing entire bundle
+            continue
     
     # Record artifact references if present
     if request.artifacts and artifact_store:

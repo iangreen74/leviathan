@@ -71,7 +71,12 @@ class TestArtifactStore:
         assert metadata1['sha256'] == metadata2['sha256']
         
         # Should only exist once on disk
-        storage_path = Path(metadata1['storage_path'])
+        # Storage path is now a URI (file://...), extract the path
+        storage_uri = metadata1['storage_path']
+        if storage_uri.startswith('file://'):
+            storage_path = Path(storage_uri[7:])  # Remove 'file://' prefix
+        else:
+            storage_path = Path(storage_uri)
         assert storage_path.exists()
         
         # File should only contain content once
@@ -151,7 +156,12 @@ class TestArtifactStore:
         content = b"Test path format"
         
         metadata = self.store.store(content, "test")
-        storage_path = Path(metadata['storage_path'])
+        # Storage path is now a URI (file://...), extract the path
+        storage_uri = metadata['storage_path']
+        if storage_uri.startswith('file://'):
+            storage_path = Path(storage_uri[7:])  # Remove 'file://' prefix
+        else:
+            storage_path = Path(storage_uri)
         
         # Should be: storage_root / shard / sha256
         assert storage_path.parent.parent == self.temp_dir

@@ -303,6 +303,67 @@ class InvariantsChecker:
         if not self.failures:
             print("✓ Topology API endpoints valid")
     
+    def check_failover_documentation(self):
+        """Validate failover documentation exists."""
+        print("\n=== Checking Failover Documentation ===")
+        
+        failover_inv = self.invariants.get('failover', {})
+        docs = failover_inv.get('documentation', [])
+        
+        for doc_path in docs:
+            doc_file = self.repo_root / doc_path
+            if not doc_file.exists():
+                self.fail(f"Failover documentation not found: {doc_path}")
+        
+        if not self.failures:
+            print("✓ Failover documentation valid")
+    
+    def check_failover_backends(self):
+        """Validate failover backend implementations exist."""
+        print("\n=== Checking Failover Backends ===")
+        
+        failover_inv = self.invariants.get('failover', {})
+        backends = failover_inv.get('backends', {})
+        
+        # Check artifact store backends
+        artifact_backends = backends.get('artifact_store', [])
+        artifact_store_file = self.repo_root / "leviathan" / "artifacts" / "store.py"
+        
+        if artifact_store_file.exists():
+            with open(artifact_store_file, 'r') as f:
+                content = f.read()
+            
+            for backend in artifact_backends:
+                if backend == 'file':
+                    if 'class FileBackend' not in content:
+                        self.fail(f"FileBackend not found in artifact store")
+                elif backend == 's3':
+                    if 'class S3Backend' not in content:
+                        self.fail(f"S3Backend not found in artifact store")
+        else:
+            self.fail("Artifact store file not found")
+        
+        # Check event store backends
+        event_backends = backends.get('event_store', [])
+        events_file = self.repo_root / "leviathan" / "graph" / "events.py"
+        
+        if events_file.exists():
+            with open(events_file, 'r') as f:
+                content = f.read()
+            
+            for backend in event_backends:
+                if backend == 'ndjson':
+                    if '_append_ndjson' not in content:
+                        self.fail(f"NDJSON backend not found in event store")
+                elif backend == 'postgres':
+                    if '_append_postgres' not in content:
+                        self.fail(f"Postgres backend not found in event store")
+        else:
+            self.fail("Event store file not found")
+        
+        if not self.failures:
+            print("✓ Failover backends valid")
+    
     def run_all_checks(self) -> bool:
         """Run all invariant checks."""
         print("Leviathan Invariants Gate")
@@ -315,6 +376,8 @@ class InvariantsChecker:
         self.check_namespace_consistency()
         self.check_topology_artifacts()
         self.check_topology_api_endpoints()
+        self.check_failover_documentation()
+        self.check_failover_backends()
         
         print("\n" + "=" * 60)
         

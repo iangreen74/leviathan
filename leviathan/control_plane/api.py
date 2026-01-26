@@ -172,6 +172,47 @@ def reset_stores():
     artifact_store = None
 
 
+def rebuild_graph_from_events():
+    """
+    Rebuild graph projection from event journal.
+    
+    This enables cold standby failover: a new control plane instance
+    can reconstruct state from durable event journal.
+    
+    Must be deterministic and idempotent.
+    """
+    global event_store, graph_store
+    
+    if not event_store or not graph_store:
+        raise RuntimeError("Stores not initialized")
+    
+    print("Rebuilding graph from event journal...")
+    
+    # Clear existing graph (idempotent rebuild)
+    graph_store.clear()
+    
+    # Load all events in chronological order
+    events = event_store.get_events()
+    
+    print(f"Replaying {len(events)} events...")
+    
+    # Project events into graph
+    for i, event in enumerate(events):
+        graph_store.apply_event(event)
+        
+        if (i + 1) % 100 == 0:
+            print(f"  Processed {i + 1}/{len(events)} events...")
+    
+    print(f"✓ Graph rebuilt: {len(events)} events projected")
+    
+    # Verify integrity
+    is_valid, error = event_store.verify_chain()
+    if not is_valid:
+        print(f"⚠ Warning: Event chain integrity check failed: {error}", file=sys.stderr)
+    else:
+        print("✓ Event chain integrity verified")
+
+
 def initialize_stores(ndjson_dir: Optional[str] = None, artifacts_dir: Optional[str] = None):
     """
     Initialize stores (called on startup or lazily).
@@ -212,6 +253,13 @@ def initialize_stores(ndjson_dir: Optional[str] = None, artifacts_dir: Optional[
     
     print(f"Leviathan Control Plane API initialized")
     print(f"Backend: {config.backend}")
+    
+    # Check if rebuild-on-start is enabled
+    rebuild_on_start = os.getenv('LEVIATHAN_REBUILD_ON_START', '0') == '1'
+    if rebuild_on_start:
+        print("\n=== REBUILD ON START ENABLED ===")
+        rebuild_graph_from_events()
+        print("=================================\n")
 
 
 @asynccontextmanager

@@ -82,3 +82,25 @@ topology:
     - /v1/topology/areas
     - /v1/topology/subsystems
     - /v1/topology/dependencies
+
+failover:
+  env_vars:
+    control_plane:
+      - LEVIATHAN_CONTROL_PLANE_BACKEND
+      - LEVIATHAN_POSTGRES_URL
+      - LEVIATHAN_REBUILD_ON_START
+    artifacts:
+      - LEVIATHAN_ARTIFACT_BACKEND
+      - LEVIATHAN_ARTIFACT_S3_BUCKET
+      - LEVIATHAN_ARTIFACT_S3_PREFIX
+  
+  backends:
+    event_store:
+      - ndjson
+      - postgres
+    artifact_store:
+      - file
+      - s3
+  
+  documentation:
+    - docs/FAILOVER_MODE.md

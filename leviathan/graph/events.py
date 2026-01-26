@@ -79,8 +79,75 @@ class EventStore:
             # Import here to avoid dependency if not using postgres
             import psycopg2
             self.conn = psycopg2.connect(postgres_url)
+            self._init_postgres_schema()
         else:
             raise ValueError(f"Unknown backend: {backend}")
+    
+    def _init_postgres_schema(self):
+        """Initialize Postgres schema if not exists."""
+        with self.conn.cursor() as cur:
+            # Create events table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS events (
+                    id SERIAL PRIMARY KEY,
+                    event_id VARCHAR(255) UNIQUE NOT NULL,
+                    event_type VARCHAR(100) NOT NULL,
+                    timestamp TIMESTAMP NOT NULL,
+                    actor_id VARCHAR(255),
+                    payload JSONB NOT NULL,
+                    prev_hash VARCHAR(64),
+                    hash VARCHAR(64) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create indexes
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_events_event_type ON events(event_type)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_events_actor_id ON events(actor_id)
+            """)
+            
+            # Create append-only trigger function if not exists
+            cur.execute("""
+                CREATE OR REPLACE FUNCTION prevent_event_modification()
+                RETURNS TRIGGER AS $$
+                BEGIN
+                    RAISE EXCEPTION 'Events are append-only and cannot be modified or deleted';
+                END;
+                $$ LANGUAGE plpgsql
+            """)
+            
+            # Create triggers if not exist
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'prevent_event_update') THEN
+                        CREATE TRIGGER prevent_event_update
+                            BEFORE UPDATE ON events
+                            FOR EACH ROW
+                            EXECUTE FUNCTION prevent_event_modification();
+                    END IF;
+                END $$
+            """)
+            
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'prevent_event_delete') THEN
+                        CREATE TRIGGER prevent_event_delete
+                            BEFORE DELETE ON events
+                            FOR EACH ROW
+                            EXECUTE FUNCTION prevent_event_modification();
+                    END IF;
+                END $$
+            """)
+        
+        self.conn.commit()
     
     def get_last_hash(self) -> Optional[str]:
         """Get hash of the last event in the chain."""

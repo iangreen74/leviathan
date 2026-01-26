@@ -205,6 +205,21 @@ class GraphStore:
                     })
             return results
     
+    def clear(self):
+        """
+        Clear all nodes and edges from the graph.
+        
+        Used for idempotent rebuild from event journal.
+        """
+        if self.backend == "memory":
+            self.nodes.clear()
+            self.edges.clear()
+        elif self.backend == "postgres":
+            with self.conn.cursor() as cur:
+                cur.execute("DELETE FROM edges")
+                cur.execute("DELETE FROM nodes")
+            self.conn.commit()
+    
     def query_edges(self, from_node: Optional[str] = None, to_node: Optional[str] = None, edge_type: Optional[EdgeType] = None) -> List[Dict[str, Any]]:
         """Query edges."""
         if self.backend == "memory":

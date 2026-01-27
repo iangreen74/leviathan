@@ -120,10 +120,10 @@ class TestWorkerWorkspace:
         assert worker.workspace.exists()
         assert worker.workspace.name == self.env_vars['ATTEMPT_ID']
         
-        # Target and artifacts dirs should be under workspace
+        # Target dir should be under workspace
         assert worker.target_dir == worker.workspace / "target"
-        # ArtifactStore backend has storage_root, not the store itself
-        assert worker.artifact_store.backend.storage_root == worker.workspace / "artifacts"
+        # ArtifactStore now uses default location (~/.leviathan/artifacts) for consistency with control plane
+        assert worker.artifact_store.backend.storage_root == Path.home() / ".leviathan" / "artifacts"
     
     def test_is_writable_success(self, tmp_path, monkeypatch):
         """Test _is_writable with writable directory."""

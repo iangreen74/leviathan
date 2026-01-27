@@ -86,7 +86,8 @@ class Worker:
         # Determine workspace directory with fallback logic
         self.workspace = self._get_workspace_root()
         self.target_dir = self.workspace / "target"
-        self.artifact_store = ArtifactStore(storage_root=self.workspace / "artifacts")
+        # Use default artifact store (same as control plane: ~/.leviathan/artifacts)
+        self.artifact_store = ArtifactStore()
         
         self.events = []
         self.artifacts = []
@@ -157,9 +158,21 @@ class Worker:
             print(f"Attempt: {self.attempt_id}")
             print()
             
+            # Emit attempt.created event (required for graph projection)
+            self._emit_event("attempt.created", {
+                'attempt_id': self.attempt_id,
+                'task_id': self.task_id,
+                'target_id': self.target_name,
+                'attempt_number': 1,  # For standalone/local runs, always 1
+                'status': 'created',
+                'created_at': datetime.utcnow().isoformat()
+            })
+            
             # Emit attempt.started event
             self._emit_event("attempt.started", {
                 'attempt_id': self.attempt_id,
+                'task_id': self.task_id,
+                'target_id': self.target_name,
                 'status': 'running',
                 'started_at': datetime.utcnow().isoformat()
             })
@@ -195,6 +208,8 @@ class Worker:
                     # Bootstrap/topology tasks don't create PRs (read-only)
                     self._emit_event("attempt.succeeded", {
                         'attempt_id': self.attempt_id,
+                        'task_id': self.task_id,
+                        'target_id': self.target_name,
                         'status': 'succeeded',
                         'completed_at': datetime.utcnow().isoformat(),
                         'artifacts_count': len(self.artifacts)
@@ -236,6 +251,8 @@ class Worker:
                 # Emit failure event
                 self._emit_event("attempt.failed", {
                     'attempt_id': self.attempt_id,
+                    'task_id': self.task_id,
+                    'target_id': self.target_name,
                     'status': 'failed',
                     'completed_at': datetime.utcnow().isoformat(),
                     'failure_type': 'execution_failed',
@@ -254,6 +271,8 @@ class Worker:
             # Emit failure event
             self._emit_event("attempt.failed", {
                 'attempt_id': self.attempt_id,
+                'task_id': self.task_id,
+                'target_id': self.target_name,
                 'status': 'failed',
                 'completed_at': datetime.utcnow().isoformat(),
                 'failure_type': 'worker_error',
@@ -294,39 +313,77 @@ class Worker:
     
     def _load_task_spec(self) -> Task:
         """
-        Load task specification from backlog.
+        Load task specification from backlog, with system-scope fallback.
         
         Returns:
             Task object with typed fields
         """
         backlog_path = self.target_dir / ".leviathan" / "backlog.yaml"
         
-        if not backlog_path.exists():
-            raise WorkerError(f"Backlog not found: {backlog_path}")
+        # Try to load from backlog if it exists
+        if backlog_path.exists():
+            # Load and normalize tasks using backlog_loader
+            tasks = load_backlog_tasks(backlog_path)
+            
+            # Find task by ID
+            for task_dict in tasks:
+                if task_dict.get('id') == self.task_id:
+                    # Convert dict to Task object
+                    return Task(
+                        id=task_dict['id'],
+                        title=task_dict.get('title', 'Untitled'),
+                        scope=task_dict.get('scope', 'unknown'),
+                        priority=task_dict.get('priority', 'medium'),
+                        ready=task_dict.get('ready', True),
+                        allowed_paths=task_dict.get('allowed_paths', []),
+                        acceptance_criteria=task_dict.get('acceptance_criteria', []),
+                        dependencies=task_dict.get('dependencies', []),
+                        estimated_size=task_dict.get('estimated_size', 'unknown'),
+                        status=task_dict.get('status'),
+                        pr_number=task_dict.get('pr_number'),
+                        branch_name=task_dict.get('branch_name')
+                    )
         
-        # Load and normalize tasks using backlog_loader
-        tasks = load_backlog_tasks(backlog_path)
+        # System-scope fallback: check if this is a recognized system task
+        if self.task_id.startswith('topology-') and self.task_id.endswith('-v1'):
+            print(f"Task not found in backlog, using system-scope fallback for topology task")
+            return Task(
+                id=self.task_id,
+                title=f"SYSTEM: topology index for {self.target_name}",
+                scope='topology',
+                priority='high',
+                ready=True,
+                allowed_paths=[],
+                acceptance_criteria=[],
+                dependencies=[],
+                estimated_size='small',
+                status=None,
+                pr_number=None,
+                branch_name=None
+            )
+        elif self.task_id.startswith('bootstrap-') and self.task_id.endswith('-v1'):
+            print(f"Task not found in backlog, using system-scope fallback for bootstrap task")
+            return Task(
+                id=self.task_id,
+                title=f"SYSTEM: bootstrap index for {self.target_name}",
+                scope='bootstrap',
+                priority='high',
+                ready=True,
+                allowed_paths=[],
+                acceptance_criteria=[],
+                dependencies=[],
+                estimated_size='small',
+                status=None,
+                pr_number=None,
+                branch_name=None
+            )
         
-        # Find task by ID
-        for task_dict in tasks:
-            if task_dict.get('id') == self.task_id:
-                # Convert dict to Task object
-                return Task(
-                    id=task_dict['id'],
-                    title=task_dict.get('title', 'Untitled'),
-                    scope=task_dict.get('scope', 'unknown'),
-                    priority=task_dict.get('priority', 'medium'),
-                    ready=task_dict.get('ready', True),
-                    allowed_paths=task_dict.get('allowed_paths', []),
-                    acceptance_criteria=task_dict.get('acceptance_criteria', []),
-                    dependencies=task_dict.get('dependencies', []),
-                    estimated_size=task_dict.get('estimated_size', 'unknown'),
-                    status=task_dict.get('status'),
-                    pr_number=task_dict.get('pr_number'),
-                    branch_name=task_dict.get('branch_name')
-                )
-        
-        raise WorkerError(f"Task {self.task_id} not found in backlog")
+        # Not a system task and not in backlog
+        raise WorkerError(
+            f"Task {self.task_id} not found in backlog. "
+            f"Add it to .leviathan/backlog.yaml OR use a system scope task id like "
+            f"topology-{self.target_name}-v1 or bootstrap-{self.target_name}-v1."
+        )
     
     def _execute_task(self, task_spec: Task) -> bool:
         """

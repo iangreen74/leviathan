@@ -364,6 +364,63 @@ class InvariantsChecker:
         if not self.failures:
             print("✓ Failover backends valid")
     
+    def check_k8s_packaging(self):
+        """Validate K8s manifests don't reference non-packaged scripts."""
+        print("\n=== Checking K8s Packaging Invariants ===")
+        
+        k8s_dir = self.repo_root / "ops" / "k8s"
+        
+        # Find all YAML files in k8s directory
+        yaml_files = list(k8s_dir.glob("**/*.yaml"))
+        
+        for yaml_file in yaml_files:
+            with open(yaml_file, 'r') as f:
+                try:
+                    docs = list(yaml.safe_load_all(f))
+                except yaml.YAMLError:
+                    continue
+            
+            for doc in docs:
+                if not doc:
+                    continue
+                
+                # Check Job and Pod specs for command/args referencing scripts/
+                self._check_container_commands(doc, yaml_file)
+        
+        print("✓ K8s packaging invariants valid")
+    
+    def _check_container_commands(self, doc: Dict, yaml_file: Path):
+        """Check container commands/args for forbidden script references."""
+        if doc.get('kind') not in ['Job', 'Pod', 'Deployment', 'StatefulSet', 'DaemonSet']:
+            return
+        
+        # Get containers from spec
+        spec = doc.get('spec', {})
+        
+        # Handle Job template
+        if doc.get('kind') == 'Job':
+            spec = spec.get('template', {}).get('spec', {})
+        # Handle Deployment/StatefulSet/DaemonSet template
+        elif doc.get('kind') in ['Deployment', 'StatefulSet', 'DaemonSet']:
+            spec = spec.get('template', {}).get('spec', {})
+        
+        containers = spec.get('containers', [])
+        
+        for container in containers:
+            # Check command
+            command = container.get('command', [])
+            for cmd_part in command:
+                if isinstance(cmd_part, str) and 'scripts/' in cmd_part:
+                    self.fail(f"K8s manifest {yaml_file.name} references scripts/ in command: {cmd_part}. "
+                             f"Use 'python3 -m leviathan.module' instead.")
+            
+            # Check args
+            args = container.get('args', [])
+            for arg in args:
+                if isinstance(arg, str) and 'scripts/' in arg:
+                    self.fail(f"K8s manifest {yaml_file.name} references scripts/ in args: {arg}. "
+                             f"Use 'python3 -m leviathan.module' instead.")
+    
     def run_all_checks(self) -> bool:
         """Run all invariant checks."""
         print("Leviathan Invariants Gate")
@@ -378,6 +435,7 @@ class InvariantsChecker:
         self.check_topology_api_endpoints()
         self.check_failover_documentation()
         self.check_failover_backends()
+        self.check_k8s_packaging()
         
         print("\n" + "=" * 60)
         

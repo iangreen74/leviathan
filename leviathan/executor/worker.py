@@ -18,6 +18,7 @@ Environment variables:
     GITHUB_TOKEN: GitHub personal access token
     LEVIATHAN_CLAUDE_API_KEY: Claude API key
     LEVIATHAN_CLAUDE_MODEL: Claude model name
+    LEVIATHAN_WORKSPACE_DIR: Optional workspace directory override (for local runs)
 """
 import os
 import sys
@@ -82,12 +83,65 @@ class Worker:
         if missing:
             raise WorkerError(f"Missing required env vars: {', '.join(missing)}")
         
-        self.workspace = Path("/workspace")
+        # Determine workspace directory with fallback logic
+        self.workspace = self._get_workspace_root()
         self.target_dir = self.workspace / "target"
         self.artifact_store = ArtifactStore(storage_root=self.workspace / "artifacts")
         
         self.events = []
         self.artifacts = []
+    
+    def _get_workspace_root(self) -> Path:
+        """
+        Determine workspace root directory with fallback logic.
+        
+        Priority:
+        1. LEVIATHAN_WORKSPACE_DIR env var (explicit override)
+        2. /workspace if writable (K8s default)
+        3. /tmp/leviathan-workspace (local fallback)
+        
+        Returns:
+            Path to workspace root (includes attempt_id subdirectory)
+        """
+        # Check for explicit override
+        workspace_override = os.getenv("LEVIATHAN_WORKSPACE_DIR")
+        if workspace_override:
+            workspace_root = Path(workspace_override) / self.attempt_id
+            workspace_root.mkdir(parents=True, exist_ok=True)
+            return workspace_root
+        
+        # Try /workspace (K8s default)
+        k8s_workspace = Path("/workspace")
+        if self._is_writable(k8s_workspace):
+            workspace_root = k8s_workspace / self.attempt_id
+            workspace_root.mkdir(parents=True, exist_ok=True)
+            return workspace_root
+        
+        # Fallback to /tmp (local execution)
+        tmp_workspace = Path("/tmp/leviathan-workspace") / self.attempt_id
+        tmp_workspace.mkdir(parents=True, exist_ok=True)
+        return tmp_workspace
+    
+    def _is_writable(self, path: Path) -> bool:
+        """
+        Check if directory exists and is writable.
+        
+        Args:
+            path: Directory path to check
+            
+        Returns:
+            True if writable, False otherwise
+        """
+        try:
+            if not path.exists():
+                return False
+            # Try to create a test file
+            test_file = path / f".write_test_{os.getpid()}"
+            test_file.touch()
+            test_file.unlink()
+            return True
+        except (OSError, PermissionError):
+            return False
     
     def run(self) -> int:
         """

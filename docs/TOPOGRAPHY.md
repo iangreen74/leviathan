@@ -80,6 +80,28 @@ Evidence objects record:
 }
 ```
 
+## Local Execution
+
+For local testing of topology tasks without K8s:
+
+```bash
+# Set workspace directory for local runs
+export LEVIATHAN_WORKSPACE_DIR=/tmp/leviathan-workspace
+
+# Set other required env vars
+export TARGET_NAME=my-target
+export TARGET_REPO_URL=https://github.com/owner/repo.git
+export TASK_ID=topology-my-target
+export ATTEMPT_ID=attempt-$(date +%s)
+export CONTROL_PLANE_URL=http://localhost:8000
+export CONTROL_PLANE_TOKEN=your-token
+
+# Run worker
+python3 -m leviathan.executor.worker
+```
+
+**Note**: `LEVIATHAN_WORKSPACE_DIR` is optional. If not set, worker will use `/workspace` (K8s) or fall back to `/tmp/leviathan-workspace` (local).
+
 ## Event Types
 
 Topology emits these event types (append-only):

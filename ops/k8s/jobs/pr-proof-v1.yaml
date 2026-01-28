@@ -2,7 +2,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: leviathan-pr-proof-v1
-  namespace: default
+  namespace: leviathan
 spec:
   backoffLimit: 0
   template:
@@ -12,8 +12,8 @@ spec:
     spec:
       restartPolicy: Never
       containers:
-      - name: pr-proof-worker
-        image: leviathan-worker:latest
+      - name: worker
+        image: leviathan-worker:local
         imagePullPolicy: IfNotPresent
         command: ["python3", "-m", "leviathan.executor.pr_proof_v1"]
         env:

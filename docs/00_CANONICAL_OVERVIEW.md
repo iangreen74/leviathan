@@ -110,8 +110,9 @@ Runtime packaging invariants are enforced at commit time via `tools/invariants_c
 
 ### Operations
 - [20_SPIDER_NODE.md](20_SPIDER_NODE.md) - Spider Node v1 observability service
-- [21_AUTONOMY_OPERATIONS.md](21_AUTONOMY_OPERATIONS.md) - Running Autonomy v1
+- [21_OPERATIONS_AUTONOMY.md](21_OPERATIONS_AUTONOMY.md) - Autonomy operations runbook
 - [22_MONITORING.md](22_MONITORING.md) - Observability and debugging
+- [23_INTEGRATION_EVIDENCE_KIND.md](23_INTEGRATION_EVIDENCE_KIND.md) - Integration testing on kind cluster
 
 ### Development
 - [30_CONTRIBUTING.md](30_CONTRIBUTING.md) - Development workflow

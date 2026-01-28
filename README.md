@@ -55,23 +55,13 @@ kubectl -n leviathan logs -l app=leviathan-worker --tail=100 -f
 
 **📚 START HERE:** [docs/00_CANONICAL_OVERVIEW.md](docs/00_CANONICAL_OVERVIEW.md)
 
-### Getting Started
+**🔄 NEW SESSION?** Read [docs/13_HANDOVER_START_HERE.md](docs/13_HANDOVER_START_HERE.md) first
+
+### Key Documents
+- [13_HANDOVER_START_HERE.md](docs/13_HANDOVER_START_HERE.md) - Official handover for new sessions
 - [01_QUICKSTART.md](docs/01_QUICKSTART.md) - Run Autonomy v1 on kind in 5 minutes
-
-### Architecture
 - [10_ARCHITECTURE.md](docs/10_ARCHITECTURE.md) - System architecture and design
-
-### Operations
-- [20_KUBERNETES_DEPLOYMENT.md](docs/20_KUBERNETES_DEPLOYMENT.md) - K8s deployment guide (coming soon)
-- [21_AUTONOMY_OPERATIONS.md](docs/21_AUTONOMY_OPERATIONS.md) - Running Autonomy v1 (coming soon)
-
-### Development
-- [30_CONTRIBUTING.md](docs/30_CONTRIBUTING.md) - Development workflow (coming soon)
-- [31_TESTING.md](docs/31_TESTING.md) - Testing strategy (coming soon)
-
-### Reference
-- [40_API_REFERENCE.md](docs/40_API_REFERENCE.md) - Control plane API (coming soon)
-- [41_CONFIGURATION.md](docs/41_CONFIGURATION.md) - Configuration reference (coming soon)
+- [07_INVARIANTS_AND_GUARDRAILS.md](docs/07_INVARIANTS_AND_GUARDRAILS.md) - Invariants philosophy
 
 **📦 Archive:** Historical documentation is in [docs/archive/pre_autonomy_docs/](docs/archive/pre_autonomy_docs/)
 

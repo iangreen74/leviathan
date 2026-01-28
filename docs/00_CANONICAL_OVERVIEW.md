@@ -16,6 +16,10 @@ Leviathan is an **autonomous software engineering system** that executes tasks f
 - ✅ Deterministic, invariant-enforced operation
 - ✅ Continuous autonomous PR creation under strict guardrails
 
+**Next Phase:**
+- 🔄 Spider Node v1 (observer + telemetry)
+- 🔄 Full Autonomy Mode (production-ready, backlog-governed)
+
 ---
 
 ## Core Principles
@@ -94,11 +98,13 @@ Runtime packaging invariants are enforced at commit time via `tools/invariants_c
 ## Documentation Index
 
 ### Getting Started
+- **[13_HANDOVER_START_HERE.md](13_HANDOVER_START_HERE.md)** - **Official handover for new sessions**
 - [01_QUICKSTART.md](01_QUICKSTART.md) - Run Autonomy v1 on kind in 5 minutes
 - [02_LOCAL_DEVELOPMENT.md](02_LOCAL_DEVELOPMENT.md) - Local development setup
 
 ### Architecture
 - [10_ARCHITECTURE.md](10_ARCHITECTURE.md) - System architecture and design
+- [07_INVARIANTS_AND_GUARDRAILS.md](07_INVARIANTS_AND_GUARDRAILS.md) - Invariants philosophy and enforcement
 - [11_EVENT_MODEL.md](11_EVENT_MODEL.md) - Event schema and lifecycle
 - [12_BACKLOG_FORMAT.md](12_BACKLOG_FORMAT.md) - Target backlog specification
 
@@ -110,7 +116,6 @@ Runtime packaging invariants are enforced at commit time via `tools/invariants_c
 ### Development
 - [30_CONTRIBUTING.md](30_CONTRIBUTING.md) - Development workflow
 - [31_TESTING.md](31_TESTING.md) - Testing strategy
-- [32_INVARIANTS.md](32_INVARIANTS.md) - Invariant checks
 
 ### Reference
 - [40_API_REFERENCE.md](40_API_REFERENCE.md) - Control plane API
@@ -221,12 +226,31 @@ leviathan/
 
 ---
 
+## What "Full Autonomy Mode" Means
+
+**Full Autonomy Mode is NOT:**
+- Autonomous planning or task invention
+- Self-directed product work
+- Unbounded scope expansion
+- Auto-merge without approval
+
+**Full Autonomy Mode IS:**
+- Continuous scheduling (every 5 minutes)
+- Backlog-governed execution only (tasks with `ready: true`)
+- No task invention or modification
+- Scope-limited to configured path prefixes
+- PR-based delivery with human review
+- Guardrails enforced (max PRs, retries, circuit breakers)
+- Deterministic evidence (full event history)
+
+---
+
 ## Next Steps
 
-1. **New to Leviathan?** Start with [01_QUICKSTART.md](01_QUICKSTART.md)
-2. **Want to understand the system?** Read [10_ARCHITECTURE.md](10_ARCHITECTURE.md)
-3. **Ready to deploy?** Follow [20_KUBERNETES_DEPLOYMENT.md](20_KUBERNETES_DEPLOYMENT.md)
-4. **Contributing?** See [30_CONTRIBUTING.md](30_CONTRIBUTING.md)
+1. **New to Leviathan?** Start with [13_HANDOVER_START_HERE.md](13_HANDOVER_START_HERE.md)
+2. **Quick start?** Run [01_QUICKSTART.md](01_QUICKSTART.md)
+3. **Understand the system?** Read [10_ARCHITECTURE.md](10_ARCHITECTURE.md)
+4. **Understand invariants?** Read [07_INVARIANTS_AND_GUARDRAILS.md](07_INVARIANTS_AND_GUARDRAILS.md)
 
 ---
 

@@ -651,6 +651,103 @@ class InvariantsChecker:
         
         print("✓ Documentation invariants valid")
     
+    def check_control_plane_autonomy_mount(self):
+        """Validate control plane has autonomy ConfigMap mounted correctly."""
+        print("\n=== Checking Control Plane Autonomy Mount ===")
+        
+        k8s_dir = self.repo_root / "ops" / "k8s"
+        control_plane_yaml = k8s_dir / "control-plane.yaml"
+        
+        if not control_plane_yaml.exists():
+            self.fail(f"Control plane manifest not found: {control_plane_yaml}")
+            return
+        
+        with open(control_plane_yaml, 'r') as f:
+            docs = list(yaml.safe_load_all(f))
+        
+        # Check ConfigMap exists
+        configmap = next((d for d in docs if d.get('kind') == 'ConfigMap' and 
+                         d.get('metadata', {}).get('name') == 'leviathan-autonomy-config'), None)
+        
+        if not configmap:
+            self.fail("ConfigMap 'leviathan-autonomy-config' not found in control-plane.yaml. "
+                     "Add ConfigMap with autonomy configuration.")
+            return
+        
+        # Check ConfigMap has dev.yaml with autonomy_enabled
+        data = configmap.get('data', {})
+        if 'dev.yaml' not in data:
+            self.fail("ConfigMap 'leviathan-autonomy-config' missing 'dev.yaml' key. "
+                     "Add dev.yaml with autonomy configuration.")
+            return
+        
+        dev_yaml_content = data['dev.yaml']
+        if 'autonomy_enabled' not in dev_yaml_content:
+            self.fail("ConfigMap dev.yaml missing 'autonomy_enabled' field. "
+                     "Add 'autonomy_enabled: true' to configuration.")
+        
+        # Check Deployment
+        deployment = next((d for d in docs if d.get('kind') == 'Deployment' and
+                          d.get('metadata', {}).get('name') == 'leviathan-control-plane'), None)
+        
+        if not deployment:
+            self.fail("Control plane Deployment not found in manifest")
+            return
+        
+        containers = deployment.get('spec', {}).get('template', {}).get('spec', {}).get('containers', [])
+        if not containers:
+            self.fail("No containers found in control plane Deployment")
+            return
+        
+        container = containers[0]
+        
+        # Check environment variable
+        env_vars = container.get('env', [])
+        autonomy_config_path_env = next((e for e in env_vars if e.get('name') == 'LEVIATHAN_AUTONOMY_CONFIG_PATH'), None)
+        
+        if not autonomy_config_path_env:
+            self.fail("Environment variable 'LEVIATHAN_AUTONOMY_CONFIG_PATH' not found in control plane container. "
+                     "Add: - name: LEVIATHAN_AUTONOMY_CONFIG_PATH\n      value: /etc/leviathan/autonomy/dev.yaml")
+        else:
+            expected_path = '/etc/leviathan/autonomy/dev.yaml'
+            actual_path = autonomy_config_path_env.get('value', '')
+            if actual_path != expected_path:
+                self.fail(f"LEVIATHAN_AUTONOMY_CONFIG_PATH should be '{expected_path}', got '{actual_path}'")
+        
+        # Check volumeMount
+        volume_mounts = container.get('volumeMounts', [])
+        autonomy_mount = next((vm for vm in volume_mounts if vm.get('name') == 'autonomy-config'), None)
+        
+        if not autonomy_mount:
+            self.fail("VolumeMount 'autonomy-config' not found in control plane container. "
+                     "Add volumeMount referencing autonomy-config volume.")
+        else:
+            expected_mount_path = '/etc/leviathan/autonomy'
+            actual_mount_path = autonomy_mount.get('mountPath', '')
+            if actual_mount_path != expected_mount_path:
+                self.fail(f"autonomy-config mountPath should be '{expected_mount_path}', got '{actual_mount_path}'")
+            
+            if not autonomy_mount.get('readOnly', False):
+                self.fail("autonomy-config volumeMount must have 'readOnly: true'. "
+                         "ConfigMap should be mounted read-only.")
+        
+        # Check volume
+        volumes = deployment.get('spec', {}).get('template', {}).get('spec', {}).get('volumes', [])
+        autonomy_volume = next((v for v in volumes if v.get('name') == 'autonomy-config'), None)
+        
+        if not autonomy_volume:
+            self.fail("Volume 'autonomy-config' not found in control plane pod spec. "
+                     "Add volume referencing ConfigMap 'leviathan-autonomy-config'.")
+        else:
+            configmap_ref = autonomy_volume.get('configMap', {})
+            configmap_name = configmap_ref.get('name', '')
+            if configmap_name != 'leviathan-autonomy-config':
+                self.fail(f"autonomy-config volume should reference ConfigMap 'leviathan-autonomy-config', "
+                         f"got '{configmap_name}'")
+        
+        if not self.failures or all('autonomy' not in f.lower() for f in self.failures[-10:]):
+            print("✓ Control plane autonomy mount valid")
+    
     def run_all_checks(self) -> bool:
         """Run all invariant checks."""
         print("Leviathan Invariants Gate")
@@ -670,6 +767,7 @@ class InvariantsChecker:
         self.check_scheduler_manifest()
         self.check_spider_manifests()
         self.check_documentation_invariants()
+        self.check_control_plane_autonomy_mount()
         
         print("\n" + "=" * 60)
         

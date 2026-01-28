@@ -1,3 +1,10 @@
+> ⚠️ ARCHIVED DOCUMENT
+> This file is preserved for historical context only.
+> It does NOT describe the current Leviathan system.
+>
+> Canonical documentation begins at:
+> `docs/00_CANONICAL_OVERVIEW.md`
+
 # K8s PR Proof v1: End-to-End Guide
 
 ## Overview

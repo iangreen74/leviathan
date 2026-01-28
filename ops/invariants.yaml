@@ -103,4 +103,4 @@ failover:
       - s3
   
   documentation:
-    - docs/FAILOVER_MODE.md
+    - docs/archive/pre_autonomy_docs/FAILOVER_MODE.md

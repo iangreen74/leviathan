@@ -537,6 +537,77 @@ class InvariantsChecker:
         
         print("✓ Scheduler manifest valid")
     
+    def check_spider_manifests(self):
+        """Validate Spider Node K8s manifests."""
+        print("\n=== Checking Spider Node Manifests ===")
+        
+        spider_dir = self.repo_root / "ops" / "k8s" / "spider"
+        
+        if not spider_dir.exists():
+            self.fail("Spider manifest directory not found: ops/k8s/spider/")
+            return
+        
+        yaml_files = list(spider_dir.glob("*.yaml"))
+        
+        if not yaml_files:
+            self.fail("No spider manifests found in ops/k8s/spider/")
+            return
+        
+        found_deployment = False
+        found_service = False
+        
+        for yaml_file in yaml_files:
+            with open(yaml_file, 'r') as f:
+                try:
+                    docs = list(yaml.safe_load_all(f))
+                except yaml.YAMLError:
+                    continue
+            
+            for doc in docs:
+                if not doc:
+                    continue
+                
+                kind = doc.get('kind')
+                
+                # Check namespace
+                namespace = doc.get('metadata', {}).get('namespace')
+                if namespace != 'leviathan':
+                    self.fail(f"Spider manifest {yaml_file.name} kind={kind} must use namespace: leviathan")
+                
+                # Check for Deployment
+                if kind == 'Deployment':
+                    found_deployment = True
+                    
+                    # Check image pull policy for local images
+                    spec = doc.get('spec', {}).get('template', {}).get('spec', {})
+                    containers = spec.get('containers', [])
+                    
+                    for container in containers:
+                        image = container.get('image', '')
+                        pull_policy = container.get('imagePullPolicy')
+                        
+                        # Check for :latest tag
+                        if ':latest' in image:
+                            self.fail(f"Spider manifest {yaml_file.name} uses ':latest' tag. "
+                                     f"Must use explicit version or ':local'")
+                        
+                        # If using local image, must have IfNotPresent
+                        if ':local' in image and pull_policy != 'IfNotPresent':
+                            self.fail(f"Spider manifest {yaml_file.name} uses local image '{image}' "
+                                     f"but imagePullPolicy is '{pull_policy}'. Must be 'IfNotPresent'")
+                
+                # Check for Service
+                if kind == 'Service':
+                    found_service = True
+        
+        if not found_deployment:
+            self.fail("No Deployment found in spider manifests")
+        
+        if not found_service:
+            self.fail("No Service found in spider manifests")
+        
+        print("✓ Spider manifests valid")
+    
     def check_documentation_invariants(self):
         """Validate canonical documentation structure."""
         print("\n=== Checking Documentation Invariants ===")
@@ -597,6 +668,7 @@ class InvariantsChecker:
         self.check_k8s_packaging()
         self.check_autonomy_config()
         self.check_scheduler_manifest()
+        self.check_spider_manifests()
         self.check_documentation_invariants()
         
         print("\n" + "=" * 60)

@@ -141,6 +141,7 @@ tasks:
         """Should raise WorkerError if task not found."""
         worker = Mock(spec=Worker)
         worker.task_id = "nonexistent-task"
+        worker.target_name = "test-target"
         worker.target_dir = self.target_dir
         worker._load_task_spec = Worker._load_task_spec.__get__(worker)
         
@@ -162,15 +163,16 @@ tasks:
             worker._load_task_spec()
     
     def test_load_task_spec_backlog_not_found(self):
-        """Should raise WorkerError if backlog file doesn't exist."""
+        """Should raise WorkerError if backlog file doesn't exist and task is not system-scope."""
         worker = Mock(spec=Worker)
         worker.task_id = "task-001"
+        worker.target_name = "test-target"
         worker.target_dir = self.target_dir
         worker._load_task_spec = Worker._load_task_spec.__get__(worker)
         
         # Don't create backlog file
         
-        with pytest.raises(WorkerError, match="Backlog not found"):
+        with pytest.raises(WorkerError, match="not found in backlog"):
             worker._load_task_spec()
     
     def test_load_task_spec_defaults(self):

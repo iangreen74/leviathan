@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: leviathan-pr-proof-v1
+  namespace: default
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: leviathan-pr-proof
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: pr-proof-worker
+        image: leviathan-worker:latest
+        imagePullPolicy: IfNotPresent
+        command: ["python3", "-m", "leviathan.executor.pr_proof_v1"]
+        env:
+        - name: GITHUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: leviathan-secrets
+              key: github-token
+        - name: CONTROL_PLANE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: leviathan-control-plane-secret
+              key: LEVIATHAN_CONTROL_PLANE_TOKEN
+        - name: CONTROL_PLANE_URL
+          value: "http://leviathan-control-plane:8000"
+        - name: TARGET_NAME
+          value: "radix"
+        - name: TARGET_REPO_URL
+          value: "https://github.com/iangreen74/radix.git"
+        - name: TARGET_BRANCH
+          value: "main"
+        - name: ATTEMPT_ID
+          value: "attempt-pr-proof-k8s"
+        - name: LEVIATHAN_WORKSPACE_DIR
+          value: "/workspace"
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+      volumes:
+      - name: workspace
+        emptyDir: {}

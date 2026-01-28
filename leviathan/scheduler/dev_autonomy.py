@@ -61,6 +61,13 @@ class DevAutonomyScheduler:
         print(f"Repo: {self.target_repo_url}")
         print()
         
+        # Check if autonomy is enabled
+        autonomy_enabled = self.config.get('autonomy_enabled', True)
+        if not autonomy_enabled:
+            print("⚠ Autonomy disabled in configuration (autonomy_enabled: false)")
+            print("✓ Scheduler exiting cleanly without submitting jobs")
+            return
+        
         # 1. Check open PRs
         open_pr_count = self._count_open_prs()
         print(f"Open PRs: {open_pr_count}/{self.max_open_prs}")

@@ -457,6 +457,86 @@ class InvariantsChecker:
                              f"uses local image '{image}' but imagePullPolicy is '{pull_policy}'. "
                              f"Must be 'IfNotPresent' for local images.")
     
+    def check_autonomy_config(self):
+        """Validate DEV autonomy configuration."""
+        print("\n=== Checking Autonomy Configuration ===")
+        
+        autonomy_config = self.repo_root / "ops" / "autonomy" / "dev.yaml"
+        
+        if not autonomy_config.exists():
+            self.fail("DEV autonomy config not found: ops/autonomy/dev.yaml")
+            return
+        
+        with open(autonomy_config, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        # Check required fields
+        required_fields = [
+            'target_id',
+            'allowed_path_prefixes',
+            'max_open_prs',
+            'max_attempts_per_task',
+            'circuit_breaker_failures'
+        ]
+        
+        for field in required_fields:
+            if field not in config:
+                self.fail(f"Autonomy config missing required field: {field}")
+        
+        # Check allowed_path_prefixes is a list
+        if 'allowed_path_prefixes' in config:
+            if not isinstance(config['allowed_path_prefixes'], list):
+                self.fail("Autonomy config allowed_path_prefixes must be a list")
+        
+        # Check max_open_prs is set
+        if 'max_open_prs' in config:
+            if config['max_open_prs'] < 1:
+                self.fail("Autonomy config max_open_prs must be >= 1")
+        
+        print("✓ Autonomy configuration valid")
+    
+    def check_scheduler_manifest(self):
+        """Validate scheduler K8s manifest exists."""
+        print("\n=== Checking Scheduler Manifest ===")
+        
+        scheduler_dir = self.repo_root / "ops" / "k8s" / "scheduler"
+        
+        if not scheduler_dir.exists():
+            self.fail("Scheduler manifest directory not found: ops/k8s/scheduler/")
+            return
+        
+        yaml_files = list(scheduler_dir.glob("*.yaml"))
+        
+        if not yaml_files:
+            self.fail("No scheduler manifests found in ops/k8s/scheduler/")
+            return
+        
+        # Check at least one manifest has CronJob or Deployment
+        found_scheduler = False
+        for yaml_file in yaml_files:
+            with open(yaml_file, 'r') as f:
+                try:
+                    docs = list(yaml.safe_load_all(f))
+                except yaml.YAMLError:
+                    continue
+            
+            for doc in docs:
+                if not doc:
+                    continue
+                
+                if doc.get('kind') in ['CronJob', 'Deployment']:
+                    found_scheduler = True
+                    
+                    # Check namespace
+                    namespace = doc.get('metadata', {}).get('namespace')
+                    if namespace != 'leviathan':
+                        self.fail(f"Scheduler manifest {yaml_file.name} must use namespace: leviathan")
+        
+        if not found_scheduler:
+            self.fail("No CronJob or Deployment found in scheduler manifests")
+        
+        print("✓ Scheduler manifest valid")
+    
     def run_all_checks(self) -> bool:
         """Run all invariant checks."""
         print("Leviathan Invariants Gate")
@@ -472,6 +552,8 @@ class InvariantsChecker:
         self.check_failover_documentation()
         self.check_failover_backends()
         self.check_k8s_packaging()
+        self.check_autonomy_config()
+        self.check_scheduler_manifest()
         
         print("\n" + "=" * 60)
         

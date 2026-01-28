@@ -92,5 +92,27 @@ spider_up = registry.register_gauge(
     "Spider Node is up and running"
 )
 
+spider_last_event_ts = registry.register_gauge(
+    "leviathan_spider_last_event_ts",
+    "Timestamp of last event received by Spider Node"
+)
+
+# Per-event-type counters (dynamically created)
+_event_type_counters: Dict[str, Counter] = {}
+
+
+def increment_event_type(event_type: str):
+    """Increment counter for specific event type."""
+    if event_type not in _event_type_counters:
+        counter = Counter(
+            f"leviathan_events_by_type_{event_type.replace('.', '_')}",
+            f"Events of type {event_type}"
+        )
+        _event_type_counters[event_type] = counter
+        registry.metrics[counter.name] = counter
+    
+    _event_type_counters[event_type].inc()
+
+
 # Set spider_up to 1 on module load
 spider_up.set(1)

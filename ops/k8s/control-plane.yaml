@@ -36,6 +36,10 @@ spec:
           env:
             - name: LEVIATHAN_CONTROL_PLANE_BACKEND
               value: ndjson
+            - name: LEVIATHAN_SPIDER_ENABLED
+              value: "true"
+            - name: LEVIATHAN_SPIDER_URL
+              value: "http://leviathan-spider:8001"
           envFrom:
             - secretRef:
                 name: leviathan-secrets

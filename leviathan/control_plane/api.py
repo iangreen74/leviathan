@@ -144,6 +144,12 @@ class TopologyDependenciesResponse(BaseModel):
     dependencies: List[Dict[str, Any]]
 
 
+class AutonomyStatusResponse(BaseModel):
+    """Response for autonomy status."""
+    autonomy_enabled: bool
+    source: str
+
+
 # Global state (initialized on startup)
 config: Optional[ControlPlaneConfig] = None
 event_store: Optional[EventStore] = None
@@ -805,6 +811,49 @@ async def topology_dependencies(
     return TopologyDependenciesResponse(
         target_id=target,
         dependencies=dependencies
+    )
+
+
+@app.get("/v1/autonomy/status", response_model=AutonomyStatusResponse)
+async def get_autonomy_status(token: str = Depends(verify_token)):
+    """
+    Get autonomy status.
+    
+    Returns the current autonomy_enabled flag from the mounted config.
+    
+    Args:
+        token: Verified bearer token
+        
+    Returns:
+        Autonomy status with source
+    """
+    import yaml
+    from pathlib import Path
+    
+    # Read from mounted ConfigMap if available
+    config_path = os.getenv('LEVIATHAN_AUTONOMY_CONFIG_PATH', '/etc/leviathan/autonomy/dev.yaml')
+    
+    try:
+        if Path(config_path).exists():
+            with open(config_path, 'r') as f:
+                autonomy_config = yaml.safe_load(f)
+            
+            autonomy_enabled = autonomy_config.get('autonomy_enabled', True)
+            source = f"configmap:{config_path}"
+        else:
+            # Fallback: default to true if config not found
+            autonomy_enabled = True
+            source = "default (config not mounted)"
+    
+    except Exception as e:
+        # Fail-safe: default to true on any error
+        print(f"Warning: Could not read autonomy config: {e}")
+        autonomy_enabled = True
+        source = "default (error reading config)"
+    
+    return AutonomyStatusResponse(
+        autonomy_enabled=autonomy_enabled,
+        source=source
     )
 
 

@@ -11,6 +11,61 @@ spec:
       port: 8000
       targetPort: 8000
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: leviathan-autonomy-config
+  namespace: leviathan
+data:
+  dev.yaml: |
+    # Leviathan Autonomy v1 - DEV Configuration
+    #
+    # This configuration enables closed-loop autonomous operation in DEV environments.
+    # Leviathan will continuously select and execute ready tasks from target backlogs.
+    #
+    # GUARDRAILS:
+    # - No autonomous planning: only executes tasks with ready: true
+    # - Strict scope restrictions via allowed_path_prefixes
+    # - Concurrency and retry limits prevent runaway execution
+    # - Circuit breaker stops scheduling after consecutive failures
+    # - PR-based delivery (no auto-merge)
+
+    # Master switch for autonomy
+    autonomy_enabled: true
+
+    target_id: radix
+    target_repo_url: https://github.com/iangreen74/radix.git
+    target_branch: main
+
+    # Scope restrictions: Only allow tasks modifying these paths
+    allowed_path_prefixes:
+      - .leviathan/
+      - docs/
+
+    # Concurrency limits
+    max_open_prs: 1
+    max_running_attempts: 1
+
+    # Retry policy
+    max_attempts_per_task: 2
+
+    # Circuit breaker: stop scheduling after N consecutive failures
+    circuit_breaker_failures: 2
+
+    # Scheduler configuration
+    schedule_cron: "*/5 * * * *"  # Every 5 minutes
+
+    # Attempt timeout (seconds)
+    attempt_timeout_seconds: 900  # 15 minutes
+
+    # Control plane connection
+    control_plane_url: http://leviathan-control-plane:8000
+
+    # Worker configuration
+    worker_image: leviathan-worker:local
+    worker_namespace: leviathan
+    workspace_dir: /workspace
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -36,8 +91,18 @@ spec:
           env:
             - name: LEVIATHAN_CONTROL_PLANE_BACKEND
               value: ndjson
+            - name: LEVIATHAN_AUTONOMY_CONFIG_PATH
+              value: /etc/leviathan/autonomy/dev.yaml
           envFrom:
             - secretRef:
                 name: leviathan-secrets
           ports:
             - containerPort: 8000
+          volumeMounts:
+            - name: autonomy-config
+              mountPath: /etc/leviathan/autonomy
+              readOnly: true
+      volumes:
+        - name: autonomy-config
+          configMap:
+            name: leviathan-autonomy-config

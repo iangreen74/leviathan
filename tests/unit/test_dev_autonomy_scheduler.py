@@ -22,6 +22,7 @@ class TestDevAutonomyScheduler:
         
         # Create minimal config
         config = {
+            'autonomy_enabled': True,
             'target_id': 'test-target',
             'target_repo_url': 'https://github.com/test/repo.git',
             'target_branch': 'main',
@@ -205,6 +206,7 @@ class TestSchedulerGuardrails:
         config_path = temp_dir / "dev.yaml"
         
         config = {
+            'autonomy_enabled': True,
             'target_id': 'test',
             'target_repo_url': 'https://github.com/test/repo.git',
             'target_branch': 'main',
@@ -231,3 +233,73 @@ class TestSchedulerGuardrails:
                     
                     # Should not fetch backlog if max PRs reached
                     mock_fetch.assert_not_called()
+    
+    def test_autonomy_disabled_exits_cleanly(self):
+        """Should exit cleanly without submitting jobs when autonomy_enabled=false."""
+        temp_dir = Path(tempfile.mkdtemp())
+        config_path = temp_dir / "dev.yaml"
+        
+        config = {
+            'autonomy_enabled': False,
+            'target_id': 'test',
+            'target_repo_url': 'https://github.com/test/repo.git',
+            'target_branch': 'main',
+            'allowed_path_prefixes': ['.leviathan/'],
+            'max_open_prs': 1,
+            'max_attempts_per_task': 2,
+            'circuit_breaker_failures': 2,
+            'control_plane_url': 'http://localhost:8000',
+            'worker_image': 'leviathan-worker:local',
+            'worker_namespace': 'leviathan',
+            'workspace_dir': '/workspace'
+        }
+        
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f)
+        
+        with patch.dict('os.environ', {'GITHUB_TOKEN': 'token', 'CONTROL_PLANE_TOKEN': 'token'}):
+            scheduler = DevAutonomyScheduler(str(config_path))
+            
+            # Mock methods that would be called during scheduling
+            with patch.object(scheduler, '_count_open_prs') as mock_count_prs:
+                with patch.object(scheduler, '_fetch_target_backlog') as mock_fetch:
+                    scheduler.run_schedule_cycle()
+                    
+                    # Should not call any scheduling methods when disabled
+                    mock_count_prs.assert_not_called()
+                    mock_fetch.assert_not_called()
+    
+    def test_autonomy_enabled_proceeds_normally(self):
+        """Should proceed with normal scheduling when autonomy_enabled=true."""
+        temp_dir = Path(tempfile.mkdtemp())
+        config_path = temp_dir / "dev.yaml"
+        
+        config = {
+            'autonomy_enabled': True,
+            'target_id': 'test',
+            'target_repo_url': 'https://github.com/test/repo.git',
+            'target_branch': 'main',
+            'allowed_path_prefixes': ['.leviathan/'],
+            'max_open_prs': 1,
+            'max_attempts_per_task': 2,
+            'circuit_breaker_failures': 2,
+            'control_plane_url': 'http://localhost:8000',
+            'worker_image': 'leviathan-worker:local',
+            'worker_namespace': 'leviathan',
+            'workspace_dir': '/workspace'
+        }
+        
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f)
+        
+        with patch.dict('os.environ', {'GITHUB_TOKEN': 'token', 'CONTROL_PLANE_TOKEN': 'token'}):
+            scheduler = DevAutonomyScheduler(str(config_path))
+            
+            # Mock to simulate normal flow
+            with patch.object(scheduler, '_count_open_prs', return_value=0):
+                with patch.object(scheduler, '_fetch_target_backlog', return_value={'tasks': []}):
+                    scheduler.run_schedule_cycle()
+                    
+                    # Should call scheduling methods (autonomy enabled)
+                    scheduler._count_open_prs.assert_called_once()
+                    scheduler._fetch_target_backlog.assert_called_once()

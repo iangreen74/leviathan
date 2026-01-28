@@ -8,7 +8,9 @@
 # - Strict scope restrictions via allowed_path_prefixes
 # - Concurrency and retry limits prevent runaway execution
 # - Circuit breaker stops scheduling after consecutive failures
-# - PR-based delivery (no auto-merge)
+
+# Master switch for autonomy
+autonomy_enabled: true
 
 target_id: radix
 target_repo_url: https://github.com/iangreen74/radix.git

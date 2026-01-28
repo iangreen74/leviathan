@@ -17,14 +17,14 @@ class TestSpiderForwarding:
     
     def setup_method(self):
         """Setup test environment."""
-        # Set auth token BEFORE initializing stores
-        os.environ["LEVIATHAN_CONTROL_PLANE_TOKEN"] = "test-token"
+        # Use the same token as conftest.py to avoid conflicts
+        # Token is already set in conftest.py: LEVIATHAN_CONTROL_PLANE_TOKEN = "test-token-12345"
         
         # Initialize stores for testing
         initialize_stores(ndjson_dir="/tmp/test_spider_forwarding", artifacts_dir="/tmp/test_artifacts")
         
         self.client = TestClient(app)
-        self.headers = {"Authorization": "Bearer test-token"}
+        self.headers = {"Authorization": "Bearer test-token-12345"}
     
     def test_spider_disabled_no_forwarding(self):
         """When Spider disabled, no forwarding should be attempted."""

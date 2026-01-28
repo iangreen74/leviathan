@@ -17,7 +17,7 @@ Leviathan is an **autonomous software engineering system** that executes tasks f
 - ✅ Continuous autonomous PR creation under strict guardrails
 
 **Next Phase:**
-- 🔄 Spider Node v1 (observer + telemetry)
+- ✅ Spider Node v1 (observer + telemetry) - IMPLEMENTED
 - 🔄 Full Autonomy Mode (production-ready, backlog-governed)
 
 ---
@@ -109,7 +109,7 @@ Runtime packaging invariants are enforced at commit time via `tools/invariants_c
 - [12_BACKLOG_FORMAT.md](12_BACKLOG_FORMAT.md) - Target backlog specification
 
 ### Operations
-- [20_KUBERNETES_DEPLOYMENT.md](20_KUBERNETES_DEPLOYMENT.md) - K8s deployment guide
+- [20_SPIDER_NODE.md](20_SPIDER_NODE.md) - Spider Node v1 observability service
 - [21_AUTONOMY_OPERATIONS.md](21_AUTONOMY_OPERATIONS.md) - Running Autonomy v1
 - [22_MONITORING.md](22_MONITORING.md) - Observability and debugging
 

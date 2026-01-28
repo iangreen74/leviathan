@@ -113,6 +113,7 @@ Runtime packaging invariants are enforced at commit time via `tools/invariants_c
 - [21_OPERATIONS_AUTONOMY.md](21_OPERATIONS_AUTONOMY.md) - Autonomy operations runbook
 - [22_MONITORING.md](22_MONITORING.md) - Observability and debugging
 - [23_INTEGRATION_EVIDENCE_KIND.md](23_INTEGRATION_EVIDENCE_KIND.md) - Integration testing on kind cluster
+- [24_EKS_DEPLOYMENT_EVIDENCE.md](24_EKS_DEPLOYMENT_EVIDENCE.md) - Production deployment on AWS EKS
 
 ### Development
 - [30_CONTRIBUTING.md](30_CONTRIBUTING.md) - Development workflow

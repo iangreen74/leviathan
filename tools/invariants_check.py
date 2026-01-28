@@ -386,6 +386,9 @@ class InvariantsChecker:
                 
                 # Check Job and Pod specs for command/args referencing scripts/
                 self._check_container_commands(doc, yaml_file)
+                
+                # Check namespace and image pull policy for Jobs
+                self._check_job_runtime_invariants(doc, yaml_file)
         
         print("✓ K8s packaging invariants valid")
     
@@ -420,6 +423,39 @@ class InvariantsChecker:
                 if isinstance(arg, str) and 'scripts/' in arg:
                     self.fail(f"K8s manifest {yaml_file.name} references scripts/ in args: {arg}. "
                              f"Use 'python3 -m leviathan.module' instead.")
+    
+    def _check_job_runtime_invariants(self, doc: Dict, yaml_file: Path):
+        """Check Job namespace and image pull policy invariants."""
+        if doc.get('kind') != 'Job':
+            return
+        
+        # Check if this is a Job in ops/k8s/jobs/
+        if 'jobs' not in str(yaml_file):
+            return
+        
+        # Check namespace
+        namespace = doc.get('metadata', {}).get('namespace')
+        if namespace == 'default':
+            self.fail(f"K8s Job {yaml_file.name} uses namespace 'default'. "
+                     f"Jobs must specify namespace: leviathan")
+        elif not namespace:
+            self.fail(f"K8s Job {yaml_file.name} missing namespace. "
+                     f"Jobs must specify namespace: leviathan")
+        
+        # Check image pull policy for local images
+        spec = doc.get('spec', {}).get('template', {}).get('spec', {})
+        containers = spec.get('containers', [])
+        
+        for container in containers:
+            image = container.get('image', '')
+            pull_policy = container.get('imagePullPolicy')
+            
+            # If using local leviathan image, must have IfNotPresent
+            if image.startswith('leviathan-') and ':local' in image:
+                if pull_policy != 'IfNotPresent':
+                    self.fail(f"K8s Job {yaml_file.name} container '{container.get('name')}' "
+                             f"uses local image '{image}' but imagePullPolicy is '{pull_policy}'. "
+                             f"Must be 'IfNotPresent' for local images.")
     
     def run_all_checks(self) -> bool:
         """Run all invariant checks."""

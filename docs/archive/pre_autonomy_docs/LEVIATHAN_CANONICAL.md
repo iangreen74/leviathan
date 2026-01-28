@@ -1,3 +1,10 @@
+> ⚠️ ARCHIVED DOCUMENT
+> This file is preserved for historical context only.
+> It does NOT describe the current Leviathan system.
+>
+> Canonical documentation begins at:
+> `docs/00_CANONICAL_OVERVIEW.md`
+
 # Leviathan: Architecture, Operation, and Strategic Roadmap
 
 **Version**: 1.0  

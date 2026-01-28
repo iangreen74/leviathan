@@ -1,3 +1,10 @@
+> ⚠️ ARCHIVED DOCUMENT
+> This file is preserved for historical context only.
+> It does NOT describe the current Leviathan system.
+>
+> Canonical documentation begins at:
+> `docs/00_CANONICAL_OVERVIEW.md`
+
 # Control Plane Deployment Guide
 
 This guide covers deploying the Leviathan control plane API to Kubernetes clusters.

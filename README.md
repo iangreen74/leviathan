@@ -1,126 +1,114 @@
 # Leviathan
 
-**Autonomous AI Agent for Repository Management**
+**Autonomous Software Engineering System**
 
-Leviathan is an autonomous AI agent that executes tasks from a backlog, creates PRs, and manages repository workflows. It operates on target repositories via a contract-based interface.
+Leviathan is a closed-loop autonomous system that executes tasks from target repository backlogs and creates pull requests automatically under strict guardrails.
 
-## Architecture
+**Current State:**
+- ✅ PR Proof v1 (local execution)
+- ✅ PR Proof v1 on Kubernetes (kind)
+- ✅ Autonomy v1 (DEV-only, closed-loop operation)
+- ✅ Deterministic, invariant-enforced operation
+- ✅ 369 tests passing, all invariants validated
 
-- **Control Plane**: Orchestrator that reads target contracts, selects tasks, and coordinates execution
-- **Executor Backends**: Pluggable backends for different execution environments
-  - WorktreeExecutor: Git worktree-based execution (default)
-  - K8sJobExecutor: Kubernetes job-based execution (future)
-- **Target Contract**: Each target repository defines its own contract, backlog, and policies
+---
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.10+
-- Git
-- GitHub CLI (`gh`) authenticated
-- Claude API key (set in `~/.leviathan/env`)
-
-### Installation
+Run Autonomy v1 on kind in 5 minutes:
 
 ```bash
-# Clone repository
-git clone git@github.com:iangreen74/leviathan.git
-cd leviathan
+# 1. Create kind cluster
+kind create cluster --name leviathan
 
-# Install dependencies
-pip install -r requirements.txt
+# 2. Build and load images
+docker build -f ops/docker/control-plane.Dockerfile -t leviathan-control-plane:local .
+docker build -f ops/docker/worker.Dockerfile -t leviathan-worker:local .
+kind load docker-image leviathan-control-plane:local --name leviathan
+kind load docker-image leviathan-worker:local --name leviathan
 
-# Configure target
-mkdir -p ~/.leviathan/targets
-cp examples/target-radix.yaml ~/.leviathan/targets/radix.yaml
-# Edit ~/.leviathan/targets/radix.yaml with your settings
+# 3. Create namespace and secrets
+kubectl create namespace leviathan
+kubectl -n leviathan create secret generic leviathan-control-plane-secret \
+  --from-literal=LEVIATHAN_CONTROL_PLANE_TOKEN=dev-token
+kubectl -n leviathan create secret generic leviathan-secrets \
+  --from-literal=github-token=<your-token>
 
-# Configure environment
-cp ops/systemd/env.example ~/.leviathan/env
-# Edit ~/.leviathan/env with your API keys
+# 4. Create autonomy config
+kubectl -n leviathan create configmap leviathan-autonomy-config \
+  --from-file=dev.yaml=ops/autonomy/dev.yaml
+
+# 5. Deploy
+kubectl apply -f ops/k8s/control-plane.yaml
+kubectl apply -f ops/k8s/scheduler/dev-autonomy.yaml
+
+# 6. Observe
+kubectl -n leviathan logs -l app=leviathan-scheduler --tail=100 -f
+kubectl -n leviathan logs -l app=leviathan-worker --tail=100 -f
 ```
 
-### Running Leviathan
+**See [docs/01_QUICKSTART.md](docs/01_QUICKSTART.md) for detailed instructions.**
 
-```bash
-# Dry run (shows next task without executing)
-python -m leviathan.runner --target ~/.leviathan/targets/radix.yaml --dry-run
-
-# Execute one task
-python -m leviathan.runner --target ~/.leviathan/targets/radix.yaml --once
-
-# Continuous mode (daemon)
-python -m leviathan.runner --target ~/.leviathan/targets/radix.yaml
-```
-
-### Systemd Service (Node A)
-
-```bash
-# Install service
-cp ops/systemd/leviathan.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable leviathan
-systemctl --user start leviathan
-
-# Check status
-systemctl --user status leviathan
-journalctl --user -u leviathan -f
-```
-
-## Target Contract
-
-Each target repository must provide:
-
-1. **`.leviathan/contract.yaml`** - Repository metadata and configuration
-2. **`.leviathan/backlog.yaml`** - Task backlog with priorities and dependencies
-3. **`.leviathan/policy.yaml`** - Allowed paths per scope and invariants
-
-See `docs/TARGET_CONTRACT.md` for details.
-
-## Operator Commands
-
-Query and operate the control plane using `leviathanctl`:
-
-```bash
-# Set up authentication
-export LEVIATHAN_API_URL=http://localhost:8000
-export LEVIATHAN_CONTROL_PLANE_TOKEN=$(cat ~/.leviathan/control-plane-token)
-
-# View graph summary
-python3 -m leviathan.cli.leviathanctl graph-summary
-
-# List recent attempts
-python3 -m leviathan.cli.leviathanctl attempts-list --limit 10
-
-# List recent failures
-python3 -m leviathan.cli.leviathanctl failures-recent --limit 10
-
-# Show attempt details
-python3 -m leviathan.cli.leviathanctl attempts-show <attempt-id>
-
-# Invalidate attempt for retry
-python3 -m leviathan.cli.leviathanctl invalidate <attempt-id> --reason "..."
-```
-
-See [leviathanctl documentation](docs/LEVIATHANCTL.md) for full details.
+---
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) - System design and components
-- [Target Contract](docs/TARGET_CONTRACT.md) - Contract format specification
-- [Runbook Node A](docs/RUNBOOK_NODE_A.md) - Production deployment guide
-- [leviathanctl CLI](docs/LEVIATHANCTL.md) - Operator CLI reference
-- [Control Plane Deployment](docs/DEPLOY_CONTROL_PLANE.md) - K8s deployment guide
-- [K8s Executor Setup](docs/K8S_EXECUTOR.md) - Kubernetes executor guide
-- [Development](docs/DEVELOPMENT.md) - Contributing and testing
+**📚 START HERE:** [docs/00_CANONICAL_OVERVIEW.md](docs/00_CANONICAL_OVERVIEW.md)
 
-## Security
+### Getting Started
+- [01_QUICKSTART.md](docs/01_QUICKSTART.md) - Run Autonomy v1 on kind in 5 minutes
 
-- Never commits secrets to repositories
-- Uses environment files for sensitive configuration
-- Operates in ephemeral worktrees (no persistent state in target repos)
-- All actions logged with timestamps for auditability
+### Architecture
+- [10_ARCHITECTURE.md](docs/10_ARCHITECTURE.md) - System architecture and design
+
+### Operations
+- [20_KUBERNETES_DEPLOYMENT.md](docs/20_KUBERNETES_DEPLOYMENT.md) - K8s deployment guide (coming soon)
+- [21_AUTONOMY_OPERATIONS.md](docs/21_AUTONOMY_OPERATIONS.md) - Running Autonomy v1 (coming soon)
+
+### Development
+- [30_CONTRIBUTING.md](docs/30_CONTRIBUTING.md) - Development workflow (coming soon)
+- [31_TESTING.md](docs/31_TESTING.md) - Testing strategy (coming soon)
+
+### Reference
+- [40_API_REFERENCE.md](docs/40_API_REFERENCE.md) - Control plane API (coming soon)
+- [41_CONFIGURATION.md](docs/41_CONFIGURATION.md) - Configuration reference (coming soon)
+
+**📦 Archive:** Historical documentation is in [docs/archive/pre_autonomy_docs/](docs/archive/pre_autonomy_docs/)
+
+---
+
+## Core Principles
+
+1. **No Autonomous Planning:** Leviathan does NOT invent tasks. It only executes tasks with `ready: true`.
+2. **PR-Based Delivery:** All changes via pull requests. No direct commits. No auto-merge (unless explicitly enabled).
+3. **Deterministic Operation:** Full event audit trail. Every action produces events.
+4. **Invariant Enforcement:** Runtime checks at commit time. CI fails if invariants violated.
+5. **Strict Guardrails:** Scope restrictions, concurrency limits, retry policies, circuit breakers.
+
+---
+
+## Safety Guarantees
+
+- ✅ **Scope Isolation:** Tasks outside `.leviathan/**` or `docs/**` are skipped (DEV mode)
+- ✅ **Concurrency Control:** Max 1 open PR at a time
+- ✅ **Retry Limits:** Max 2 attempts per task
+- ✅ **Circuit Breaker:** Stops after consecutive failures
+- ✅ **No Auto-Merge:** Human review required
+- ✅ **Deterministic Evidence:** Full event history persisted
+
+---
+
+## Testing
+
+```bash
+# Run unit tests (369 tests)
+python3 -m pytest tests/unit -q
+
+# Run invariants check
+python3 tools/invariants_check.py
+```
+
+---
 
 ## License
 

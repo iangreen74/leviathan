@@ -13,12 +13,13 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 import uvicorn
 
 from leviathan.control_plane.config import get_config, ControlPlaneConfig
+from leviathan.control_plane.spider_forwarder import forwarder
 from leviathan.graph.events import EventStore, Event, EventType
 from leviathan.graph.store import GraphStore
 from leviathan.graph.schema import NodeType, EdgeType
@@ -323,6 +324,7 @@ async def healthz():
 @app.post("/v1/events/ingest", response_model=EventIngestResponse)
 async def ingest_events(
     request: EventIngestRequest,
+    background_tasks: BackgroundTasks,
     token: str = Depends(verify_token)
 ):
     """
@@ -330,6 +332,7 @@ async def ingest_events(
     
     Args:
         request: Event bundle with events and optional artifact references
+        background_tasks: FastAPI background tasks for Spider forwarding
         token: Verified bearer token
         
     Returns:
@@ -366,6 +369,11 @@ async def ingest_events(
             # We just validate it exists
             if not artifact_store.exists(artifact_ref.sha256):
                 print(f"Warning: artifact {artifact_ref.sha256} not found in store")
+    
+    # Forward to Spider Node (best-effort, non-blocking)
+    # This happens in background after response is returned
+    bundle_dict = request.dict()
+    background_tasks.add_task(forwarder.forward_event_bundle, bundle_dict)
     
     return EventIngestResponse(
         ingested=ingested_count,

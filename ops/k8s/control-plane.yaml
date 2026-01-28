@@ -93,6 +93,10 @@ spec:
               value: ndjson
             - name: LEVIATHAN_AUTONOMY_CONFIG_PATH
               value: /etc/leviathan/autonomy/dev.yaml
+            - name: LEVIATHAN_SPIDER_ENABLED
+              value: "true"
+            - name: LEVIATHAN_SPIDER_URL
+              value: "http://leviathan-spider:8001"
           envFrom:
             - secretRef:
                 name: leviathan-secrets

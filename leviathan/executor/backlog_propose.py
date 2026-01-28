@@ -263,13 +263,16 @@ This PR proposes a new task for the Leviathan backlog.
     
     def _build_authenticated_url(self, repo_url: str, token: str) -> str:
         """Build authenticated GitHub URL with token."""
+        # Sanitize token (strip whitespace/newlines)
+        token = token.strip()
+        
         # Convert SSH to HTTPS if needed
         if repo_url.startswith("git@github.com:"):
             repo_url = repo_url.replace("git@github.com:", "https://github.com/")
         
-        # Inject token (use simple token@ format, not x-access-token:token@)
+        # Inject token using x-access-token format (most compatible)
         if "https://" in repo_url:
-            return repo_url.replace("https://", f"https://{token}@")
+            return repo_url.replace("https://", f"https://x-access-token:{token}@")
         
         return repo_url
     

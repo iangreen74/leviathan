@@ -249,7 +249,7 @@ class TestBacklogPropose:
         assert repo == 'radix'
     
     def test_build_authenticated_url_https(self):
-        """Should inject token into HTTPS URL."""
+        """Should inject token into HTTPS URL using x-access-token format."""
         proposer = BacklogProposer(
             target_name='test',
             target_repo_url='https://github.com/test/repo.git',
@@ -265,12 +265,12 @@ class TestBacklogPropose:
             'test-token'
         )
         
-        assert 'test-token@' in auth_url
+        assert auth_url == 'https://x-access-token:test-token@github.com/test/repo.git'
         assert auth_url.startswith('https://')
-        assert 'x-access-token' not in auth_url  # Should use simple token@ format
+        assert 'x-access-token:' in auth_url
     
     def test_build_authenticated_url_ssh_converts_to_https(self):
-        """Should convert SSH URL to HTTPS with token."""
+        """Should convert SSH URL to HTTPS with token using x-access-token format."""
         proposer = BacklogProposer(
             target_name='test',
             target_repo_url='git@github.com:test/repo.git',
@@ -286,10 +286,33 @@ class TestBacklogPropose:
             'test-token'
         )
         
-        assert 'test-token@' in auth_url
+        assert auth_url == 'https://x-access-token:test-token@github.com/test/repo.git'
         assert auth_url.startswith('https://')
         assert 'git@' not in auth_url
-        assert 'x-access-token' not in auth_url  # Should use simple token@ format
+        assert 'x-access-token:' in auth_url
+
+
+    def test_build_authenticated_url_strips_token_whitespace(self):
+        """Should strip whitespace and newlines from token."""
+        proposer = BacklogProposer(
+            target_name='test',
+            target_repo_url='https://github.com/test/repo.git',
+            target_branch='main',
+            task_spec={},
+            attempt_id='test',
+            github_token='test-token',
+            workspace=self.temp_dir
+        )
+        
+        # Test with token that has whitespace
+        auth_url = proposer._build_authenticated_url(
+            'https://github.com/test/repo.git',
+            '  test-token\n'
+        )
+        
+        assert auth_url == 'https://x-access-token:test-token@github.com/test/repo.git'
+        assert '\n' not in auth_url
+        assert auth_url.count('test-token') == 1
 
 
 class TestGitOperations:

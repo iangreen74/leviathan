@@ -537,6 +537,49 @@ class InvariantsChecker:
         
         print("✓ Scheduler manifest valid")
     
+    def check_documentation_invariants(self):
+        """Validate canonical documentation structure."""
+        print("\n=== Checking Documentation Invariants ===")
+        
+        # Required canonical docs
+        required_docs = [
+            'docs/00_CANONICAL_OVERVIEW.md',
+            'docs/07_INVARIANTS_AND_GUARDRAILS.md',
+            'docs/13_HANDOVER_START_HERE.md'
+        ]
+        
+        for doc_path in required_docs:
+            doc_file = self.repo_root / doc_path
+            if not doc_file.exists():
+                self.fail(f"Required canonical doc not found: {doc_path}")
+        
+        # Check that canonical overview references key docs
+        overview_file = self.repo_root / 'docs' / '00_CANONICAL_OVERVIEW.md'
+        if overview_file.exists():
+            with open(overview_file, 'r') as f:
+                content = f.read()
+            
+            if '07_INVARIANTS_AND_GUARDRAILS.md' not in content:
+                self.fail("00_CANONICAL_OVERVIEW.md must reference 07_INVARIANTS_AND_GUARDRAILS.md")
+            
+            if '13_HANDOVER_START_HERE.md' not in content:
+                self.fail("00_CANONICAL_OVERVIEW.md must reference 13_HANDOVER_START_HERE.md")
+        
+        # Check that no canonical docs reference archived docs
+        docs_dir = self.repo_root / 'docs'
+        for doc_file in docs_dir.glob('*.md'):
+            with open(doc_file, 'r') as f:
+                content = f.read()
+            
+            # Check for references to archived docs (not in archive directory itself)
+            if 'docs/archive/pre_autonomy_docs/' in content:
+                # This is allowed - it's just pointing to the archive
+                pass
+            elif '/archive/pre_autonomy_docs/' in content and '](docs/archive/pre_autonomy_docs/' not in content:
+                self.fail(f"{doc_file.name} references archived docs incorrectly")
+        
+        print("✓ Documentation invariants valid")
+    
     def run_all_checks(self) -> bool:
         """Run all invariant checks."""
         print("Leviathan Invariants Gate")
@@ -554,6 +597,7 @@ class InvariantsChecker:
         self.check_k8s_packaging()
         self.check_autonomy_config()
         self.check_scheduler_manifest()
+        self.check_documentation_invariants()
         
         print("\n" + "=" * 60)
         

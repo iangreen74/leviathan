@@ -270,7 +270,7 @@ class DevAutonomyScheduler:
                             'name': 'worker',
                             'image': self.worker_image,
                             'imagePullPolicy': 'IfNotPresent',
-                            'command': ['python3', '-m', 'leviathan.executor.backlog_propose_worker'],
+                            'command': ['python3', '-m', 'leviathan.executor.task_worker'],
                             'env': [
                                 {'name': 'TARGET_NAME', 'value': self.target_id},
                                 {'name': 'TARGET_REPO_URL', 'value': self.target_repo_url},
@@ -292,7 +292,7 @@ class DevAutonomyScheduler:
                                     'name': 'CONTROL_PLANE_TOKEN',
                                     'valueFrom': {
                                         'secretKeyRef': {
-                                            'name': 'leviathan-control-plane-secret',
+                                            'name': 'leviathan-secrets',
                                             'key': 'LEVIATHAN_CONTROL_PLANE_TOKEN'
                                         }
                                     }

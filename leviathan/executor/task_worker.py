@@ -113,9 +113,8 @@ def create_branch_and_commit(repo_path: Path, branch_name: str, task_title: str,
         print("✓ No changes to commit (task is idempotent)")
         return None
     
-    # Add changed files
-    for file_path in changed_files:
-        subprocess.run(['git', 'add', file_path], check=True, capture_output=True)
+    # Add all changed files (simpler and handles all modifications)
+    subprocess.run(['git', 'add', '-A'], check=True, capture_output=True)
     
     # Commit
     commit_message = f"feat(leviathan): {task_title}"

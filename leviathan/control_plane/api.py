@@ -822,6 +822,44 @@ async def topology_dependencies(
     )
 
 
+@app.get("/v1/events/recent")
+async def get_recent_events(
+    limit: int = 200,
+    token: str = Depends(verify_token)
+):
+    """
+    Get recent events from the event store.
+    
+    Read-only endpoint for observability. Returns events in reverse chronological order.
+    
+    Args:
+        limit: Maximum number of events to return (default 200)
+        token: Verified bearer token
+        
+    Returns:
+        List of recent events
+    """
+    # Get all events and return the last N
+    all_events = event_store.get_events()
+    recent = all_events[-limit:] if len(all_events) > limit else all_events
+    
+    # Reverse to get newest first
+    recent.reverse()
+    
+    # Convert to dict for JSON response
+    return [
+        {
+            'event_id': e.event_id,
+            'event_type': e.event_type,
+            'timestamp': e.timestamp.isoformat(),
+            'actor_id': e.actor_id,
+            'payload': e.payload,
+            'hash': e.hash
+        }
+        for e in recent
+    ]
+
+
 @app.get("/v1/autonomy/status", response_model=AutonomyStatusResponse)
 async def get_autonomy_status(token: str = Depends(verify_token)):
     """

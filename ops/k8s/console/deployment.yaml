@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: leviathan-console
+  namespace: leviathan
+  labels:
+    app: leviathan-console
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: leviathan-console
+  template:
+    metadata:
+      labels:
+        app: leviathan-console
+    spec:
+      containers:
+      - name: console
+        image: leviathan-worker:local
+        imagePullPolicy: IfNotPresent
+        command: ["python3", "-m", "leviathan.operator_console.api"]
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: PORT
+          value: "8080"
+        - name: CONTROL_PLANE_URL
+          value: "http://leviathan-control-plane:8000"
+        - name: CONTROL_PLANE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: leviathan-secrets
+              key: LEVIATHAN_CONTROL_PLANE_TOKEN
+        - name: SPIDER_URL
+          value: "http://leviathan-spider:8001"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"

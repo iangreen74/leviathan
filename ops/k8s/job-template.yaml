@@ -37,7 +37,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: leviathan-secrets
-              key: control-plane-token
+              key: LEVIATHAN_CONTROL_PLANE_TOKEN
         - name: GITHUB_TOKEN
           valueFrom:
             secretKeyRef:

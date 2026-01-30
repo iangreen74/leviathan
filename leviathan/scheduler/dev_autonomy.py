@@ -68,13 +68,19 @@ class DevAutonomyScheduler:
             print("✓ Scheduler exiting cleanly without submitting jobs")
             return
         
-        # 1. Check open PRs
-        open_pr_count = self._count_open_prs()
+        # 1. Check open PRs and build in-flight task set
+        open_agent_prs = self._get_open_agent_prs()
+        open_pr_count = len(open_agent_prs)
         print(f"Open PRs: {open_pr_count}/{self.max_open_prs}")
         
         if open_pr_count >= self.max_open_prs:
             print("✓ Max open PRs reached. Skipping this cycle.")
             return
+        
+        # Build set of task_ids with open PRs (in-flight tasks)
+        in_flight_tasks = self._extract_in_flight_tasks(open_agent_prs)
+        if in_flight_tasks:
+            print(f"In-flight tasks (open PRs): {', '.join(sorted(in_flight_tasks))}")
         
         # 2. Fetch target backlog
         backlog = self._fetch_target_backlog()
@@ -90,8 +96,8 @@ class DevAutonomyScheduler:
             print("✗ Circuit breaker tripped (consecutive failures). Stopping.")
             return
         
-        # 4. Select next executable task
-        task = self._select_next_task(tasks)
+        # 4. Select next executable task (skip in-flight tasks)
+        task = self._select_next_task(tasks, in_flight_tasks)
         
         if not task:
             print("✓ No executable tasks found")
@@ -121,8 +127,11 @@ class DevAutonomyScheduler:
         else:
             print(f"✗ Failed to submit worker job")
     
-    def _count_open_prs(self) -> int:
-        """Count open PRs created by Leviathan (branch prefix: agent/)."""
+    def _get_open_agent_prs(self) -> List[Dict]:
+        """Get open PRs created by Leviathan (branch prefix: agent/).
+        
+        Returns list of PR info dicts with: number, url, branch, title.
+        """
         owner, repo = self._extract_repo_info(self.target_repo_url)
         
         url = f"https://api.github.com/repos/{owner}/{repo}/pulls"
@@ -134,13 +143,30 @@ class DevAutonomyScheduler:
             response.raise_for_status()
             prs = response.json()
             
-            # Count PRs with branch prefix "agent/"
-            leviathan_prs = [pr for pr in prs if pr.get('head', {}).get('ref', '').startswith('agent/')]
-            return len(leviathan_prs)
+            # Filter PRs with branch prefix "agent/" and extract relevant info
+            agent_prs = []
+            for pr in prs:
+                head_ref = pr.get('head', {}).get('ref', '')
+                if head_ref.startswith('agent/'):
+                    agent_prs.append({
+                        'number': pr.get('number'),
+                        'url': pr.get('html_url'),
+                        'branch': head_ref,
+                        'title': pr.get('title', '')
+                    })
+            return agent_prs
         except Exception as e:
-            print(f"Warning: Could not count open PRs: {e}")
-            # Fail safe: assume max reached to prevent runaway
+            print(f"Warning: Could not fetch open PRs: {e}")
+            # Fail safe: return empty list
+            return []
+    
+    def _count_open_prs(self) -> int:
+        """Count open PRs created by Leviathan (branch prefix: agent/)."""
+        agent_prs = self._get_open_agent_prs()
+        # Fail safe: if we couldn't fetch, assume max reached to prevent runaway
+        if agent_prs is None:
             return self.max_open_prs
+        return len(agent_prs)
     
     def _fetch_target_backlog(self) -> Optional[Dict]:
         """Fetch target backlog from repo."""
@@ -180,8 +206,55 @@ class DevAutonomyScheduler:
         # In production, this would query event store
         return False  # TODO: Implement circuit breaker check
     
-    def _select_next_task(self, tasks: List[Dict]) -> Optional[Dict]:
-        """Select next executable task with guardrails."""
+    def _extract_in_flight_tasks(self, open_agent_prs: List[Dict]) -> set:
+        """Extract set of task_ids that have open PRs.
+        
+        A PR is for task_id if the branch name contains the task_id string.
+        Branch format: agent/task-exec-attempt-<task_id>-<attempt_hash>
+        """
+        in_flight = set()
+        for pr in open_agent_prs:
+            branch = pr.get('branch', '')
+            task_id = self._extract_task_id_from_branch(branch)
+            if task_id:
+                in_flight.add(task_id)
+        return in_flight
+    
+    def _extract_task_id_from_branch(self, branch: str) -> Optional[str]:
+        """Extract task_id from agent branch name.
+        
+        Branch format: agent/task-exec-attempt-<task_id>-<attempt_hash>
+        Example: agent/task-exec-attempt-docs-leviathan-backlog-guide-1fa64a45
+        
+        Returns task_id or None if not parseable.
+        """
+        if not branch.startswith('agent/'):
+            return None
+        
+        # Remove 'agent/' prefix
+        branch_suffix = branch[6:]
+        
+        # Remove 'task-exec-attempt-' prefix if present
+        if branch_suffix.startswith('task-exec-attempt-'):
+            branch_suffix = branch_suffix[18:]
+        
+        # Remove attempt hash suffix (last segment after final hyphen)
+        # task_id is everything except the last 8-char hex suffix
+        parts = branch_suffix.rsplit('-', 1)
+        if len(parts) == 2 and len(parts[1]) == 8:
+            # Likely format: <task_id>-<hash>
+            return parts[0]
+        
+        # Fallback: return the whole suffix (conservative)
+        return branch_suffix
+    
+    def _select_next_task(self, tasks: List[Dict], in_flight_tasks: set) -> Optional[Dict]:
+        """Select next executable task with guardrails.
+        
+        Args:
+            tasks: List of tasks from backlog
+            in_flight_tasks: Set of task_ids with open PRs
+        """
         for task in tasks:
             task_id = task.get('id')
             
@@ -204,6 +277,11 @@ class DevAutonomyScheduler:
             allowed_paths = task.get('allowed_paths', [])
             if not self._is_scope_allowed(allowed_paths):
                 print(f"  Skipping {task_id}: scope outside allowed prefixes")
+                continue
+            
+            # Check if task already has open PR (open PR latch)
+            if task_id in in_flight_tasks:
+                print(f"  Skipping {task_id}: open PR exists")
                 continue
             
             # This task is executable

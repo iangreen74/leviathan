@@ -748,6 +748,71 @@ class InvariantsChecker:
         if not self.failures or all('autonomy' not in f.lower() for f in self.failures[-10:]):
             print("✓ Control plane autonomy mount valid")
     
+    def check_console_manifests(self):
+        """Validate Console K8s manifests."""
+        print("\n=== Checking Console Manifests ===")
+        
+        console_dir = self.repo_root / "ops" / "k8s" / "console"
+        
+        if not console_dir.exists():
+            self.fail("Console manifest directory not found: ops/k8s/console/")
+            return
+        
+        yaml_files = list(console_dir.glob("*.yaml"))
+        
+        if not yaml_files:
+            self.fail("No console manifests found in ops/k8s/console/")
+            return
+        
+        found_deployment = False
+        found_service = False
+        
+        for yaml_file in yaml_files:
+            with open(yaml_file, 'r') as f:
+                try:
+                    docs = list(yaml.safe_load_all(f))
+                except yaml.YAMLError:
+                    continue
+            
+            for doc in docs:
+                if not doc:
+                    continue
+                
+                kind = doc.get('kind')
+                
+                # Check namespace
+                namespace = doc.get('metadata', {}).get('namespace')
+                if namespace != 'leviathan':
+                    self.fail(f"Console manifest {yaml_file.name} kind={kind} must use namespace: leviathan")
+                
+                # Check for Deployment
+                if kind == 'Deployment':
+                    found_deployment = True
+                    
+                    # Check image pull policy for local images
+                    spec = doc.get('spec', {}).get('template', {}).get('spec', {})
+                    containers = spec.get('containers', [])
+                    
+                    for container in containers:
+                        image = container.get('image', '')
+                        
+                        # Check for :latest tag
+                        if ':latest' in image:
+                            self.fail(f"Console container uses forbidden ':latest' tag: {image}")
+                
+                # Check for Service
+                if kind == 'Service':
+                    found_service = True
+        
+        if not found_deployment:
+            self.fail("Console Deployment not found in manifests")
+        
+        if not found_service:
+            self.fail("Console Service not found in manifests")
+        
+        if not self.failures:
+            print("✓ Console manifests valid")
+    
     def run_all_checks(self) -> bool:
         """Run all invariant checks."""
         print("Leviathan Invariants Gate")
@@ -766,6 +831,7 @@ class InvariantsChecker:
         self.check_autonomy_config()
         self.check_scheduler_manifest()
         self.check_spider_manifests()
+        self.check_console_manifests()
         self.check_documentation_invariants()
         self.check_control_plane_autonomy_mount()
         

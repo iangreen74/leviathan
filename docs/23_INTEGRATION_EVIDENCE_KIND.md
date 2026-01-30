@@ -176,12 +176,49 @@ The autonomy ConfigMap is already defined in `ops/k8s/control-plane.yaml`, so it
 
 ---
 
-## D. Deploy Components
+## D. Build and Load Images
 
-### Step 1: Deploy Control Plane
+### Step 1: Build Control Plane Image
 
 ```bash
-kubectl apply -f ops/k8s/control-plane.yaml
+docker build -f ops/docker/control-plane.Dockerfile -t leviathan-control-plane:local .
+```
+
+### Step 2: Build Worker Image
+
+```bash
+docker build -f ops/docker/worker.Dockerfile -t leviathan-worker:local .
+```
+
+### Step 3: Build Console Image
+
+```bash
+docker build -f ops/docker/console.Dockerfile -t leviathan-console:local .
+```
+
+### Step 4: Load Images into kind
+
+```bash
+kind load docker-image leviathan-control-plane:local --name leviathan
+kind load docker-image leviathan-worker:local --name leviathan
+kind load docker-image leviathan-console:local --name leviathan
+```
+
+**Expected output for each:**
+```
+Image: "leviathan-<component>:local" with ID "sha256:..." not yet present on node "leviathan-control-plane", loading...
+```
+
+---
+
+## E. Deploy Components with Kustomize
+
+### Deploy Entire Stack
+
+Use Kustomize to deploy all components at once:
+
+```bash
+kubectl apply -k ops/k8s/overlays/kind
 ```
 
 **Expected output:**
@@ -189,63 +226,39 @@ kubectl apply -f ops/k8s/control-plane.yaml
 service/leviathan-control-plane created
 configmap/leviathan-autonomy-config created
 deployment.apps/leviathan-control-plane created
+deployment.apps/leviathan-spider created
+service/leviathan-spider created
+deployment.apps/leviathan-console created
+service/leviathan-console created
+cronjob.batch/leviathan-dev-scheduler created
+configmap/job-template created
 ```
 
-Wait for control plane to be ready:
+### Verify All Pods
+
+Wait for all pods to be ready:
 ```bash
-kubectl wait --for=condition=ready pod -l app=leviathan-control-plane -n leviathan --timeout=120s
+kubectl wait --for=condition=ready pod --all -n leviathan --timeout=120s
 ```
 
-**Expected:**
-```
-pod/leviathan-control-plane-<id> condition met
-```
-
-Verify deployment:
+Check pod status:
 ```bash
-kubectl get pods -n leviathan -l app=leviathan-control-plane
+kubectl get pods -n leviathan
 ```
 
 **Expected:**
 ```
 NAME                                      READY   STATUS    RESTARTS   AGE
 leviathan-control-plane-<id>              1/1     Running   0          <time>
+leviathan-spider-<id>                     1/1     Running   0          <time>
+leviathan-console-<id>                    1/1     Running   0          <time>
 ```
 
-### Step 2: Deploy Spider Node
+---
 
-```bash
-kubectl apply -f ops/k8s/spider/
-```
+## F. Verify Components
 
-**Expected output:**
-```
-deployment.apps/leviathan-spider created
-service/leviathan-spider created
-```
-
-Wait for spider to be ready:
-```bash
-kubectl wait --for=condition=ready pod -l app=leviathan-spider -n leviathan --timeout=120s
-```
-
-**Expected:**
-```
-pod/leviathan-spider-<id> condition met
-```
-
-Verify deployment:
-```bash
-kubectl get pods -n leviathan -l app=leviathan-spider
-```
-
-**Expected:**
-```
-NAME                               READY   STATUS    RESTARTS   AGE
-leviathan-spider-<id>              1/1     Running   0          <time>
-```
-
-### Step 3: Deploy Scheduler
+### Step 1: Verify Control Plane
 
 ```bash
 kubectl apply -f ops/k8s/scheduler/dev-autonomy.yaml

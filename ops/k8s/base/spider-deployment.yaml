@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: leviathan-spider
+  namespace: leviathan
+  labels:
+    app: leviathan-spider
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: leviathan-spider
+  template:
+    metadata:
+      labels:
+        app: leviathan-spider
+    spec:
+      containers:
+      - name: spider
+        image: leviathan-worker:local
+        imagePullPolicy: IfNotPresent
+        command: ["python3", "-m", "leviathan.spider"]
+        ports:
+        - containerPort: 8001
+          name: http
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"

@@ -73,6 +73,25 @@ Runtime packaging invariants are enforced at commit time via `tools/invariants_c
                                     └──────────────────┘
 ```
 
+### Deployment
+
+Leviathan uses **Kustomize** for environment-specific deployments:
+
+- **Base:** `ops/k8s/base/` - Common manifests for all environments
+- **Overlays:**
+  - `ops/k8s/overlays/kind/` - Local development with kind cluster
+  - `ops/k8s/overlays/eks/` - AWS EKS production deployment
+
+Deploy to kind:
+```bash
+kubectl apply -k ops/k8s/overlays/kind
+```
+
+Deploy to EKS (after configuring image tags):
+```bash
+kubectl apply -k ops/k8s/overlays/eks
+```
+
 ### Components
 
 1. **Scheduler** (`leviathan.scheduler.dev_autonomy`)

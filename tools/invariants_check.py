@@ -810,8 +810,55 @@ class InvariantsChecker:
         if not found_service:
             self.fail("Console Service not found in manifests")
         
+        # Check console Dockerfile exists
+        console_dockerfile = self.repo_root / "ops" / "docker" / "console.Dockerfile"
+        if not console_dockerfile.exists():
+            self.fail("Console Dockerfile not found: ops/docker/console.Dockerfile")
+        
         if not self.failures:
             print("✓ Console manifests valid")
+    
+    def check_kustomize_structure(self):
+        """Validate Kustomize base and overlays structure."""
+        print("\n=== Checking Kustomize Structure ===")
+        
+        # Check base exists
+        base_dir = self.repo_root / "ops" / "k8s" / "base"
+        if not base_dir.exists():
+            self.fail("Kustomize base directory not found: ops/k8s/base/")
+            return
+        
+        base_kustomization = base_dir / "kustomization.yaml"
+        if not base_kustomization.exists():
+            self.fail("Base kustomization.yaml not found: ops/k8s/base/kustomization.yaml")
+        
+        # Check overlays exist
+        overlays_dir = self.repo_root / "ops" / "k8s" / "overlays"
+        if not overlays_dir.exists():
+            self.fail("Overlays directory not found: ops/k8s/overlays/")
+            return
+        
+        # Check kind overlay
+        kind_overlay = overlays_dir / "kind" / "kustomization.yaml"
+        if not kind_overlay.exists():
+            self.fail("Kind overlay not found: ops/k8s/overlays/kind/kustomization.yaml")
+        
+        # Check EKS overlay
+        eks_overlay = overlays_dir / "eks" / "kustomization.yaml"
+        if not eks_overlay.exists():
+            self.fail("EKS overlay not found: ops/k8s/overlays/eks/kustomization.yaml")
+        
+        # Validate no :latest tags in overlays
+        for overlay_name in ['kind', 'eks']:
+            overlay_file = overlays_dir / overlay_name / "kustomization.yaml"
+            if overlay_file.exists():
+                with open(overlay_file, 'r') as f:
+                    content = f.read()
+                    if ':latest' in content:
+                        self.fail(f"{overlay_name} overlay uses forbidden ':latest' tag")
+        
+        if not self.failures:
+            print("✓ Kustomize structure valid")
     
     def run_all_checks(self) -> bool:
         """Run all invariant checks."""
@@ -832,6 +879,7 @@ class InvariantsChecker:
         self.check_scheduler_manifest()
         self.check_spider_manifests()
         self.check_console_manifests()
+        self.check_kustomize_structure()
         self.check_documentation_invariants()
         self.check_control_plane_autonomy_mount()
         

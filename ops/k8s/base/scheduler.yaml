@@ -1,0 +1,80 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: leviathan-dev-scheduler
+  namespace: leviathan
+spec:
+  schedule: "*/5 * * * *"  # Every 5 minutes
+  concurrencyPolicy: Forbid  # Prevent overlapping runs
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 600  # Cleanup after 10 minutes
+      template:
+        metadata:
+          labels:
+            app: leviathan-scheduler
+        spec:
+          restartPolicy: Never
+          serviceAccountName: leviathan-scheduler
+          containers:
+          - name: scheduler
+            image: leviathan-worker:local
+            imagePullPolicy: IfNotPresent
+            command: ["python3", "-m", "leviathan.scheduler.dev_autonomy"]
+            env:
+            - name: AUTONOMY_CONFIG
+              value: "/etc/leviathan/autonomy/dev.yaml"
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: leviathan-secrets
+                  key: github-token
+            - name: CONTROL_PLANE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: leviathan-control-plane-secret
+                  key: LEVIATHAN_CONTROL_PLANE_TOKEN
+            volumeMounts:
+            - name: autonomy-config
+              mountPath: /etc/leviathan/autonomy
+              readOnly: true
+          volumes:
+          - name: autonomy-config
+            configMap:
+              name: leviathan-autonomy-config
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: leviathan-scheduler
+  namespace: leviathan
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: leviathan-scheduler
+  namespace: leviathan
+rules:
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["create", "get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: leviathan-scheduler
+  namespace: leviathan
+subjects:
+- kind: ServiceAccount
+  name: leviathan-scheduler
+  namespace: leviathan
+roleRef:
+  kind: Role
+  name: leviathan-scheduler
+  apiGroup: rbac.authorization.k8s.io

@@ -1,3 +1,54 @@
+# Leviathan Demo Harness: kind + EKS
+
+## Image Build and Push
+
+### Build All Images
+
+```bash
+# Control Plane
+docker build -f ops/docker/control-plane.Dockerfile -t leviathan-control-plane:local .
+
+# Worker
+docker build -f ops/docker/worker.Dockerfile -t leviathan-worker:local .
+
+# Console
+docker build -f ops/docker/console.Dockerfile -t leviathan-console:local .
+```
+
+### For kind: Load Images
+
+```bash
+kind load docker-image leviathan-control-plane:local --name leviathan
+kind load docker-image leviathan-worker:local --name leviathan
+kind load docker-image leviathan-console:local --name leviathan
+```
+
+### For EKS: Tag and Push to ECR
+
+```bash
+# Set your AWS account and region
+export AWS_ACCOUNT_ID=<your-account-id>
+export AWS_REGION=<your-region>
+export IMAGE_TAG=v1.0.0
+
+# Login to ECR
+aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+
+# Tag and push control plane
+docker tag leviathan-control-plane:local $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/leviathan-control-plane:$IMAGE_TAG
+docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/leviathan-control-plane:$IMAGE_TAG
+
+# Tag and push worker
+docker tag leviathan-worker:local $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/leviathan-worker:$IMAGE_TAG
+docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/leviathan-worker:$IMAGE_TAG
+
+# Tag and push console
+docker tag leviathan-console:local $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/leviathan-console:$IMAGE_TAG
+docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/leviathan-console:$IMAGE_TAG
+```
+
+---
+
 # Leviathan Demo Harness - Live System Walkthrough
 
 **Version:** 1.0  

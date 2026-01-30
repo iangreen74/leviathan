@@ -1,0 +1,60 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: leviathan-attempt-ATTEMPT_ID
+  namespace: leviathan
+  labels:
+    app: leviathan
+    target: TARGET_NAME
+    task: TASK_ID
+    attempt: ATTEMPT_ID
+spec:
+  template:
+    metadata:
+      labels:
+        app: leviathan
+        attempt: ATTEMPT_ID
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: worker
+        image: leviathan-worker:local
+        command: ["python", "-m", "leviathan.executor.worker"]
+        env:
+        - name: TARGET_NAME
+          value: "TARGET_NAME"
+        - name: TARGET_REPO_URL
+          value: "TARGET_REPO_URL"
+        - name: TARGET_BRANCH
+          value: "main"
+        - name: TASK_ID
+          value: "TASK_ID"
+        - name: ATTEMPT_ID
+          value: "ATTEMPT_ID"
+        - name: CONTROL_PLANE_URL
+          value: "http://leviathan-control-plane:8000"
+        - name: CONTROL_PLANE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: leviathan-secrets
+              key: LEVIATHAN_CONTROL_PLANE_TOKEN
+        - name: GITHUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: leviathan-secrets
+              key: github-token
+        - name: LEVIATHAN_CLAUDE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: leviathan-secrets
+              key: claude-api-key
+        - name: LEVIATHAN_CLAUDE_MODEL
+          value: "claude-3-5-sonnet-20241022"
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+      volumes:
+      - name: workspace
+        emptyDir: {}
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600

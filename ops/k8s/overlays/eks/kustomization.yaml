@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: leviathan
+
+resources:
+  - ../../base
+
+# Override images with ECR registry tags for EKS
+# Replace <ACCOUNT>, <REGION>, and <TAG> with actual values during deployment
+images:
+  - name: leviathan-control-plane
+    newName: <ACCOUNT>.dkr.ecr.<REGION>.amazonaws.com/leviathan-control-plane
+    newTag: <TAG>
+  - name: leviathan-worker
+    newName: <ACCOUNT>.dkr.ecr.<REGION>.amazonaws.com/leviathan-worker
+    newTag: <TAG>
+  - name: leviathan-console
+    newName: <ACCOUNT>.dkr.ecr.<REGION>.amazonaws.com/leviathan-console
+    newTag: <TAG>
+
+# EKS-specific patches can be added here
+# Example: ingress for console (optional, commented out)
+# patchesStrategicMerge:
+#   - ingress.yaml

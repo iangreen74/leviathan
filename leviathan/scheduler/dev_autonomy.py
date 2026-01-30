@@ -292,7 +292,7 @@ class DevAutonomyScheduler:
                                     'name': 'CONTROL_PLANE_TOKEN',
                                     'valueFrom': {
                                         'secretKeyRef': {
-                                            'name': 'leviathan-control-plane-secret',
+                                            'name': 'leviathan-secrets',
                                             'key': 'LEVIATHAN_CONTROL_PLANE_TOKEN'
                                         }
                                     }

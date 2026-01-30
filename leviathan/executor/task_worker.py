@@ -30,6 +30,7 @@ from typing import Tuple, Optional
 import requests
 
 from leviathan.executor.task_exec import execute_task, PathViolationError
+from leviathan.executor.backlog_update import mark_task_completed, is_task_completed
 
 
 def post_event_to_control_plane(event_type: str, payload: dict, control_plane_url: str, token: str, actor_id: str):
@@ -308,37 +309,83 @@ def main():
         else:
             print(f"  No files changed (idempotent)")
         
-        # Create branch and commit
+        # Update backlog to mark task completed
+        # This ensures task won't be re-selected even if execution produced no changes
+        backlog_path = repo_path / '.leviathan' / 'backlog.yaml'
         branch_name = f"agent/task-exec-{attempt_id}"
+        
+        # Mark task completed (pr_number will be null initially, set after PR creation)
+        task_updated = mark_task_completed(
+            backlog_path,
+            task_id,
+            attempt_id,
+            branch_name,
+            pr_number=None  # Will be updated in PR body or follow-up
+        )
+        
+        if task_updated:
+            print(f"✓ Marked task as completed in backlog")
+            # Add backlog to changed files
+            backlog_changed_files = exec_result.changed_files + ['.leviathan/backlog.yaml']
+        else:
+            print(f"⚠ Warning: Task {task_id} not found in backlog for status update")
+            backlog_changed_files = exec_result.changed_files
+        
+        # Create branch and commit
         commit_sha = create_branch_and_commit(
             repo_path,
             branch_name,
             task_spec.get('title', 'Task execution'),
-            exec_result.changed_files
+            backlog_changed_files
         )
         
-        # If no changes, succeed without creating PR
+        # If no changes (should be rare since we updated backlog), check if task already completed
         if commit_sha is None:
-            post_event_to_control_plane(
-                'attempt.succeeded',
-                {
-                    'attempt_id': attempt_id,
-                    'task_id': task_id,
-                    'target_id': target_name,
-                    'status': 'succeeded',
-                    'note': 'No changes needed (task already satisfied)'
-                },
-                control_plane_url,
-                control_plane_token,
-                actor_id
-            )
-            
-            print()
-            print("=" * 60)
-            print("✅ Worker Complete (No Changes)")
-            print("=" * 60)
-            print("Task already satisfied, no PR created")
-            return
+            # Check if task was already completed in backlog
+            if is_task_completed(backlog_path, task_id):
+                post_event_to_control_plane(
+                    'attempt.succeeded',
+                    {
+                        'attempt_id': attempt_id,
+                        'task_id': task_id,
+                        'target_id': target_name,
+                        'status': 'succeeded',
+                        'note': 'Task already completed in backlog'
+                    },
+                    control_plane_url,
+                    control_plane_token,
+                    actor_id
+                )
+                
+                print()
+                print("=" * 60)
+                print("✅ Worker Complete (Already Completed)")
+                print("=" * 60)
+                print("Task already marked completed in backlog, no PR created")
+                return
+            else:
+                # This should not happen since we just updated the backlog
+                # But if it does, it means there were truly no changes
+                post_event_to_control_plane(
+                    'attempt.succeeded',
+                    {
+                        'attempt_id': attempt_id,
+                        'task_id': task_id,
+                        'target_id': target_name,
+                        'status': 'succeeded',
+                        'note': 'No changes needed (task already satisfied)'
+                    },
+                    control_plane_url,
+                    control_plane_token,
+                    actor_id
+                )
+                
+                print()
+                print("=" * 60)
+                print("✅ Worker Complete (No Changes)")
+                print("=" * 60)
+                print("Task already satisfied, no PR created")
+                return
         
         # Push branch
         push_branch(repo_path, branch_name)

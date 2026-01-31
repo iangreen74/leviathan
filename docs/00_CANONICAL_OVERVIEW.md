@@ -37,7 +37,7 @@ Every action produces deterministic, auditable events. Full event history is per
 Runtime packaging invariants are enforced at commit time via `tools/invariants_check.py`. CI fails if invariants are violated.
 
 ### 5. Strict Guardrails (DEV)
-- Scope restrictions: Only `.leviathan/**` and `docs/**` paths
+- Scope restrictions: Only `.leviathan/**`, `docs/**`, and `tests/**` paths
 - Concurrency limits: Max 1 open PR at a time
 - Retry policy: Max 2 attempts per task
 - Circuit breaker: Stops after consecutive failures
@@ -191,7 +191,7 @@ python3 -m leviathan.executor.pr_proof_v1
 ## Safety Guarantees
 
 ### Scope Isolation
-Tasks modifying files outside `.leviathan/**` or `docs/**` are automatically skipped in DEV mode.
+Tasks modifying files outside `.leviathan/**`, `docs/**`, or `tests/**` are automatically skipped in DEV mode.
 
 ### Concurrency Control
 Only 1 open PR at a time prevents overwhelming reviewers.

@@ -20,6 +20,7 @@ target_branch: main
 allowed_path_prefixes:
   - .leviathan/
   - docs/
+  - tests/
 
 # Concurrency limits
 max_open_prs: 1

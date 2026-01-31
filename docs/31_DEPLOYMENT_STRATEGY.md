@@ -13,6 +13,123 @@ This document defines Leviathan's deployment strategy across environments, from 
 
 ---
 
+## Infrastructure via GitHub Actions (Terraform)
+
+**Status:** Implemented (Phase 1: EC2 provisioning)
+
+Leviathan infrastructure is provisioned via Terraform, orchestrated through GitHub Actions workflows. This ensures:
+- Infrastructure as Code (IaC) with version control
+- Automated plan/apply with approval gates
+- Evidence artifacts for audit trail
+- Sentinel policy enforcement
+
+### Workflows
+
+**1. Backend Bootstrap** (`.github/workflows/infra-bootstrap-backend.yml`)
+- **Trigger:** Manual (workflow_dispatch)
+- **Purpose:** One-time setup of S3 bucket + DynamoDB table for Terraform state
+- **Inputs:** AWS account ID, region
+- **Outputs:** Backend configuration, required secrets
+
+**2. Terraform Plan** (`.github/workflows/infra-leviathan-k3s-plan.yml`)
+- **Trigger:** Automatic on PR changes to `infra/leviathan_k3s_ec2/**`
+- **Actions:**
+  - Runs `terraform fmt`, `validate`, `plan`
+  - Generates evidence report (resources, security, cost)
+  - Uploads plan artifacts (30-day retention)
+  - Comments on PR with plan summary
+- **Outputs:** Plan file, JSON summary, evidence markdown
+
+**3. Terraform Apply** (`.github/workflows/infra-leviathan-k3s-apply.yml`)
+- **Trigger:** Manual (workflow_dispatch) with confirmation input
+- **Protection:** Requires GitHub Environment approval
+- **Actions:**
+  - Validates confirmation ("apply" must be typed)
+  - Runs plan, then apply from main branch
+  - Generates apply evidence with outputs
+  - Uploads evidence artifacts (90-day retention)
+- **Safety:** No automated destroy; manual rollback only
+
+### Required Secrets/Variables
+
+Set in repository `Settings > Secrets and variables > Actions`:
+
+**AWS Credentials (choose one):**
+- **Option A (OIDC - Recommended):**
+  - `AWS_TERRAFORM_ROLE_ARN` - IAM role ARN for GitHub OIDC
+- **Option B (Access Keys):**
+  - `AWS_ACCESS_KEY_ID`
+  - `AWS_SECRET_ACCESS_KEY`
+
+**Terraform Backend:**
+- `TF_BACKEND_BUCKET` - S3 bucket name (from bootstrap)
+- `TF_BACKEND_DYNAMODB_TABLE` - DynamoDB table name (default: `leviathan-terraform-locks`)
+- `AWS_REGION` - AWS region (default: `us-west-2`)
+
+**Terraform Variables:**
+- Create `infra/leviathan_k3s_ec2/terraform.tfvars` (not committed) with:
+  ```hcl
+  vpc_id         = "vpc-xxxxxxxxx"
+  subnet_id      = "subnet-xxxxxxxxx"
+  operator_cidrs = ["YOUR.IP/32"]
+  ssh_key_name   = "your-key-name"
+  ```
+
+### IAM Role for OIDC (Recommended)
+
+If using OIDC, create IAM role with trust policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:iangreen74/leviathan:*"
+        }
+      }
+    }
+  ]
+}
+```
+
+Attach policy with permissions:
+- EC2: Full (for instance management)
+- VPC: Read (for security groups)
+- IAM: Limited (for instance profiles)
+- SecretsManager: Read (for secret access validation)
+- S3: Full on state bucket
+- DynamoDB: Full on locks table
+
+### Sentinel Policy Checks
+
+All infrastructure changes are validated against Sentinel policies (`ops/sentinel/policies.yaml`):
+
+**Enforced Policies:**
+1. Terraform provider versions must be pinned
+2. No `0.0.0.0/0` ingress on ports 22, 6443, 8080
+3. EC2 instance type must be in allowlist (t3.small/medium/large)
+4. Root volume must be gp3 >= 20GB
+5. No public S3 buckets
+6. No wildcard IAM policies (except read-only with specific ARNs)
+7. EBS volumes must be encrypted
+8. Terraform backend required (warning)
+
+**Enforcement:** Sentinel checks run in CI. PRs cannot merge if policies are violated.
+
+**Checker:** `tools/sentinel_check.py` (with unit tests in `tests/unit/test_sentinel_check.py`)
+
+---
+
 ## Deployment Environments
 
 ### 1. Local Development (kind)

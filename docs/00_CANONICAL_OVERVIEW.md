@@ -1,6 +1,6 @@
 # Leviathan: Canonical Documentation
 
-**Last Updated:** 2026-01-28  
+**Last Updated:** 2026-01-31  
 **Status:** Canonical (Authoritative)
 
 ---
@@ -118,33 +118,25 @@ kubectl apply -k ops/k8s/overlays/eks
 
 ### Getting Started
 - **[13_HANDOVER_START_HERE.md](13_HANDOVER_START_HERE.md)** - **Official handover for new sessions**
+- **[35_HANDOVER_NEXT_PHASE.md](35_HANDOVER_NEXT_PHASE.md)** - **Handover for next engineering phase**
 - [01_QUICKSTART.md](01_QUICKSTART.md) - Run Autonomy v1 on kind in 5 minutes
-- [02_LOCAL_DEVELOPMENT.md](02_LOCAL_DEVELOPMENT.md) - Local development setup
+
+### Strategic Vision
+- **[30_LEVIATHAN_ROADMAP.md](30_LEVIATHAN_ROADMAP.md)** - Mission, philosophy, and roadmap
+- [34_LEVIATHAN_AS_SRE.md](34_LEVIATHAN_AS_SRE.md) - Long-term SRE vision
 
 ### Architecture
 - [10_ARCHITECTURE.md](10_ARCHITECTURE.md) - System architecture and design
+- [32_MULTI_TARGET_ARCHITECTURE.md](32_MULTI_TARGET_ARCHITECTURE.md) - Multi-target design and scheduling
 - [07_INVARIANTS_AND_GUARDRAILS.md](07_INVARIANTS_AND_GUARDRAILS.md) - Invariants philosophy and enforcement
-- [11_EVENT_MODEL.md](11_EVENT_MODEL.md) - Event schema and lifecycle
-- [12_BACKLOG_FORMAT.md](12_BACKLOG_FORMAT.md) - Target backlog specification
+
+### Deployment
+- **[31_DEPLOYMENT_STRATEGY.md](31_DEPLOYMENT_STRATEGY.md)** - Deployment guide (kind, EC2+k3s, EKS)
 
 ### Operations
-- [20_SPIDER_NODE.md](20_SPIDER_NODE.md) - Spider Node v1 observability service
+- **[33_OBSERVABILITY_AND_OPERATOR_EXPERIENCE.md](33_OBSERVABILITY_AND_OPERATOR_EXPERIENCE.md)** - Operator experience and monitoring
 - [21_OPERATIONS_AUTONOMY.md](21_OPERATIONS_AUTONOMY.md) - Autonomy operations runbook
-- [22_MONITORING.md](22_MONITORING.md) - Observability and debugging
-- [23_INTEGRATION_EVIDENCE_KIND.md](23_INTEGRATION_EVIDENCE_KIND.md) - Integration testing on kind cluster
-- [24_EKS_DEPLOYMENT_EVIDENCE.md](24_EKS_DEPLOYMENT_EVIDENCE.md) - Production deployment on AWS EKS
-
-### Demonstrations
-- [26_DEMO_HARNESS_KIND_EKS.md](26_DEMO_HARNESS_KIND_EKS.md) - Live system walkthrough (kind + EKS)
-
-### Development
-- [30_CONTRIBUTING.md](30_CONTRIBUTING.md) - Development workflow
-- [31_TESTING.md](31_TESTING.md) - Testing strategy
-
-### Reference
-- [40_API_REFERENCE.md](40_API_REFERENCE.md) - Control plane API
-- [41_CONFIGURATION.md](41_CONFIGURATION.md) - Configuration reference
-- [42_TROUBLESHOOTING.md](42_TROUBLESHOOTING.md) - Common issues
+- [20_SPIDER_NODE.md](20_SPIDER_NODE.md) - Spider Node v1 observability service
 
 ---
 
@@ -272,19 +264,22 @@ leviathan/
 ## Next Steps
 
 1. **New to Leviathan?** Start with [13_HANDOVER_START_HERE.md](13_HANDOVER_START_HERE.md)
-2. **Quick start?** Run [01_QUICKSTART.md](01_QUICKSTART.md)
-3. **Understand the system?** Read [10_ARCHITECTURE.md](10_ARCHITECTURE.md)
-4. **Understand invariants?** Read [07_INVARIANTS_AND_GUARDRAILS.md](07_INVARIANTS_AND_GUARDRAILS.md)
+2. **Next engineering phase?** Read [35_HANDOVER_NEXT_PHASE.md](35_HANDOVER_NEXT_PHASE.md)
+3. **Strategic vision?** Read [30_LEVIATHAN_ROADMAP.md](30_LEVIATHAN_ROADMAP.md)
+4. **Deploy to AWS?** Follow [31_DEPLOYMENT_STRATEGY.md](31_DEPLOYMENT_STRATEGY.md)
+5. **Quick start?** Run [01_QUICKSTART.md](01_QUICKSTART.md)
 
 ---
 
 ## Archive Notice
 
-All documentation prior to 2026-01-28 has been archived to `docs/archive/pre_autonomy_docs/`.
+Documentation has been archived to `docs/archive/` on the following dates:
+- **2026-01-28:** Pre-autonomy documentation archived to `pre_autonomy_docs/`
+- **2026-01-31:** Evidence and demo documents archived (see `ARCHIVE_NOTE_2026_01_31.md`)
 
-These files are preserved for historical context but do NOT describe the current system.
+Archived files are preserved for historical context but do NOT describe the current system.
 
-**If you are starting a new conversation or task, begin here.**
+**Always use canonical documentation in `docs/` for current information.**
 
 ---
 

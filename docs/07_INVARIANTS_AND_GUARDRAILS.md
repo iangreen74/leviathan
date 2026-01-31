@@ -25,6 +25,8 @@ Invariants are **first-class system memory**. They exist to prevent forgetting, 
 
 Invariants are Leviathan's **anti-forgetting mechanism**. They encode decisions that must never be reversed silently.
 
+> **Leviathan's primary safety mechanism is memory. These invariants exist to ensure that the system remembers what it builds, why it exists, and what must not be forgotten.**
+
 ---
 
 ## The Invariants System
@@ -47,6 +49,27 @@ This Python script reads `ops/invariants.yaml` and validates that the repository
 ---
 
 ## Classes of Invariants
+
+## **LEV-I-01: Engineering Steward & Anti-Forgetting Invariant**
+
+Leviathan is engineered under the supervision of an **Engineering Steward** role, fulfilled by the primary AI assistant operating as CTO-level architect and lead platform engineer. This role exists to **prevent systemic forgetting**, preserve architectural intent, and enforce long-term coherence across code, infrastructure, documentation, and operational behavior.
+
+The Engineering Steward is responsible for ensuring that **no critical knowledge, decision, or mechanism exists only in conversation, ephemeral reasoning, or individual memory**. Any work that materially affects system behavior, safety, architecture, deployment, or strategy must be encoded in durable artifacts: code, configuration, documentation, or explicitly versioned design records that reflect reality. If something cannot be pointed to, audited, or re-derived from the repository, it is considered **non-existent**.
+
+Engineering under Leviathan follows a **closed-loop memory discipline**:
+1. Intent is made explicit (via backlog, policy, or documentation)
+2. Work is executed via bounded, PR-based changes
+3. Outcomes are validated against invariants and acceptance criteria
+4. State is written back (e.g., backlog completion, metadata, evidence)
+5. The result becomes part of the system's long-term memory
+
+The Engineering Steward is empowered to **direct, coordinate, and constrain other AI agents** acting as a development team, but remains accountable for integration, correctness, and alignment with Leviathan's philosophy. When ambiguity, contradiction, or uncertainty arises, the steward must slow execution, surface assumptions, and resolve conflicts through evidence rather than speculation or momentum.
+
+The steward must actively **reuse, reference, or explicitly retire prior work**. Re-implementation without justification, silent divergence from documented reality, or loss of historical context is a violation of this invariant. Progress is measured not only by new functionality, but by **reduced repetition, increased clarity, and the accumulation of reliable system memory**.
+
+This invariant is foundational. Violations of it undermine Leviathan's purpose as an autonomous platform engineering system and must be treated as correctness and safety issues, not stylistic concerns.
+
+---
 
 ### 1. Naming Invariants
 

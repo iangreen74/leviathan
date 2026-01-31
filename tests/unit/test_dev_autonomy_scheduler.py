@@ -106,12 +106,18 @@ class TestDevAutonomyScheduler:
             
             assert scheduler._is_scope_allowed(allowed_paths) is False
     
-    def test_skip_tasks_with_dependencies(self):
-        """Should skip tasks with dependencies (conservative for v1)."""
+    def test_skip_tasks_with_unsatisfied_dependencies(self):
+        """Should skip tasks when dependencies are not completed."""
         with patch.dict('os.environ', {'GITHUB_TOKEN': 'token', 'CONTROL_PLANE_TOKEN': 'token'}):
             scheduler = DevAutonomyScheduler(str(self.config_path))
             
             tasks = [
+                {
+                    'id': 'task-0',
+                    'ready': True,
+                    'status': 'pending',
+                    'allowed_paths': ['.leviathan/backlog.yaml']
+                },
                 {
                     'id': 'task-1',
                     'ready': True,
@@ -122,7 +128,144 @@ class TestDevAutonomyScheduler:
             
             selected = scheduler._select_next_task(tasks, set())
             
+            # Should select task-0 (no deps), skip task-1 (dep not completed)
+            assert selected is not None
+            assert selected['id'] == 'task-0'
+    
+    def test_select_task_when_dependencies_completed(self):
+        """Should select task when all dependencies are completed."""
+        with patch.dict('os.environ', {'GITHUB_TOKEN': 'token', 'CONTROL_PLANE_TOKEN': 'token'}):
+            scheduler = DevAutonomyScheduler(str(self.config_path))
+            
+            tasks = [
+                {
+                    'id': 'task-0',
+                    'ready': True,
+                    'status': 'completed',
+                    'allowed_paths': ['.leviathan/backlog.yaml']
+                },
+                {
+                    'id': 'task-1',
+                    'ready': True,
+                    'status': 'pending',
+                    'allowed_paths': ['.leviathan/backlog.yaml'],
+                    'dependencies': ['task-0']
+                },
+            ]
+            
+            selected = scheduler._select_next_task(tasks, set())
+            
+            # Should select task-1 (dep completed)
+            assert selected is not None
+            assert selected['id'] == 'task-1'
+    
+    def test_skip_task_with_missing_dependency(self):
+        """Should skip task when dependency doesn't exist in backlog."""
+        with patch.dict('os.environ', {'GITHUB_TOKEN': 'token', 'CONTROL_PLANE_TOKEN': 'token'}):
+            scheduler = DevAutonomyScheduler(str(self.config_path))
+            
+            tasks = [
+                {
+                    'id': 'task-1',
+                    'ready': True,
+                    'allowed_paths': ['.leviathan/backlog.yaml'],
+                    'dependencies': ['task-missing']
+                },
+            ]
+            
+            selected = scheduler._select_next_task(tasks, set())
+            
+            # Should skip task-1 (dep doesn't exist)
             assert selected is None
+    
+    def test_select_task_with_multiple_dependencies_all_completed(self):
+        """Should select task when all multiple dependencies are completed."""
+        with patch.dict('os.environ', {'GITHUB_TOKEN': 'token', 'CONTROL_PLANE_TOKEN': 'token'}):
+            scheduler = DevAutonomyScheduler(str(self.config_path))
+            
+            tasks = [
+                {
+                    'id': 'task-0',
+                    'ready': True,
+                    'status': 'completed',
+                    'allowed_paths': ['.leviathan/backlog.yaml']
+                },
+                {
+                    'id': 'task-1',
+                    'ready': True,
+                    'status': 'completed',
+                    'allowed_paths': ['.leviathan/backlog.yaml']
+                },
+                {
+                    'id': 'task-2',
+                    'ready': True,
+                    'status': 'pending',
+                    'allowed_paths': ['.leviathan/backlog.yaml'],
+                    'dependencies': ['task-0', 'task-1']
+                },
+            ]
+            
+            selected = scheduler._select_next_task(tasks, set())
+            
+            # Should select task-2 (all deps completed)
+            assert selected is not None
+            assert selected['id'] == 'task-2'
+    
+    def test_skip_task_with_multiple_dependencies_partial_completed(self):
+        """Should skip task when only some dependencies are completed."""
+        with patch.dict('os.environ', {'GITHUB_TOKEN': 'token', 'CONTROL_PLANE_TOKEN': 'token'}):
+            scheduler = DevAutonomyScheduler(str(self.config_path))
+            
+            tasks = [
+                {
+                    'id': 'task-0',
+                    'ready': True,
+                    'status': 'completed',
+                    'allowed_paths': ['.leviathan/backlog.yaml']
+                },
+                {
+                    'id': 'task-1',
+                    'ready': True,
+                    'status': 'pending',
+                    'allowed_paths': ['.leviathan/backlog.yaml']
+                },
+                {
+                    'id': 'task-2',
+                    'ready': True,
+                    'status': 'pending',
+                    'allowed_paths': ['.leviathan/backlog.yaml'],
+                    'dependencies': ['task-0', 'task-1']
+                },
+            ]
+            
+            selected = scheduler._select_next_task(tasks, set())
+            
+            # Should select task-1 (no deps), skip task-2 (task-1 not completed)
+            assert selected is not None
+            assert selected['id'] == 'task-1'
+    
+    def test_get_unsatisfied_dependencies(self):
+        """Test _get_unsatisfied_dependencies helper."""
+        with patch.dict('os.environ', {'GITHUB_TOKEN': 'token', 'CONTROL_PLANE_TOKEN': 'token'}):
+            scheduler = DevAutonomyScheduler(str(self.config_path))
+            
+            task_status_index = {
+                'task-a': 'completed',
+                'task-b': 'pending',
+                'task-c': 'completed'
+            }
+            
+            # All satisfied
+            unsatisfied = scheduler._get_unsatisfied_dependencies(['task-a', 'task-c'], task_status_index)
+            assert unsatisfied == []
+            
+            # Some unsatisfied
+            unsatisfied = scheduler._get_unsatisfied_dependencies(['task-a', 'task-b'], task_status_index)
+            assert unsatisfied == ['task-b']
+            
+            # Missing dependency
+            unsatisfied = scheduler._get_unsatisfied_dependencies(['task-missing'], task_status_index)
+            assert unsatisfied == ['task-missing']
     
     def test_skip_tasks_with_non_pending_status(self):
         """Should skip tasks with status other than pending."""

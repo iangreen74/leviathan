@@ -255,39 +255,99 @@ class DevAutonomyScheduler:
             tasks: List of tasks from backlog
             in_flight_tasks: Set of task_ids with open PRs
         """
+        # Build task status index for dependency checking
+        task_status_index = {task.get('id'): task.get('status', 'pending') for task in tasks}
+        
+        # Track skip reasons for summary
+        skip_counts = {
+            'not_ready': 0,
+            'status': 0,
+            'deps': 0,
+            'scope': 0,
+            'inflight': 0
+        }
+        
         for task in tasks:
             task_id = task.get('id')
             
             # Must have ready: true
             if not task.get('ready', False):
+                skip_counts['not_ready'] += 1
                 continue
             
             # Check status (pending or missing)
             status = task.get('status', 'pending')
             if status not in ['pending', None]:
+                skip_counts['status'] += 1
                 continue
             
             # Check dependencies satisfied
             dependencies = task.get('dependencies', [])
             if dependencies:
-                # For v1, skip tasks with dependencies (conservative)
-                continue
+                unsatisfied_deps = self._get_unsatisfied_dependencies(dependencies, task_status_index)
+                if unsatisfied_deps:
+                    skip_counts['deps'] += 1
+                    print(f"  Skipping {task_id}: dependencies not completed: {','.join(unsatisfied_deps)}")
+                    continue
             
             # Check scope restrictions
             allowed_paths = task.get('allowed_paths', [])
             if not self._is_scope_allowed(allowed_paths):
+                skip_counts['scope'] += 1
                 print(f"  Skipping {task_id}: scope outside allowed prefixes")
                 continue
             
             # Check if task already has open PR (open PR latch)
             if task_id in in_flight_tasks:
+                skip_counts['inflight'] += 1
                 print(f"  Skipping {task_id}: open PR exists")
                 continue
             
             # This task is executable
+            self._print_skip_summary(skip_counts)
             return task
         
+        # No task selected, print summary
+        self._print_skip_summary(skip_counts)
         return None
+    
+    def _get_unsatisfied_dependencies(self, dependencies: List[str], task_status_index: Dict[str, str]) -> List[str]:
+        """Check which dependencies are not satisfied.
+        
+        A dependency is satisfied iff:
+        - The dep task exists in backlog
+        - The dep task status == 'completed'
+        
+        Args:
+            dependencies: List of task_ids this task depends on
+            task_status_index: Dict mapping task_id -> status
+            
+        Returns:
+            List of unsatisfied dependency task_ids
+        """
+        unsatisfied = []
+        for dep_id in dependencies:
+            dep_status = task_status_index.get(dep_id)
+            if dep_status != 'completed':
+                unsatisfied.append(dep_id)
+        return unsatisfied
+    
+    def _print_skip_summary(self, skip_counts: Dict[str, int]):
+        """Print compact skip summary for observability."""
+        total_skipped = sum(skip_counts.values())
+        if total_skipped > 0:
+            parts = []
+            if skip_counts['not_ready'] > 0:
+                parts.append(f"not_ready={skip_counts['not_ready']}")
+            if skip_counts['status'] > 0:
+                parts.append(f"status={skip_counts['status']}")
+            if skip_counts['deps'] > 0:
+                parts.append(f"deps={skip_counts['deps']}")
+            if skip_counts['scope'] > 0:
+                parts.append(f"scope={skip_counts['scope']}")
+            if skip_counts['inflight'] > 0:
+                parts.append(f"inflight={skip_counts['inflight']}")
+            print(f"  Skip summary: {', '.join(parts)}")
     
     def _is_scope_allowed(self, allowed_paths: List[str]) -> bool:
         """Check if task scope is within allowed path prefixes."""

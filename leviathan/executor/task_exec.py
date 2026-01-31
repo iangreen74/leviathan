@@ -135,7 +135,16 @@ def _generate_doc_content(task_spec: Dict[str, Any]) -> str:
         lines.append("")
     
     # Add content sections based on task type
-    if 'operating-rules' in task_id or 'rules' in title.lower():
+    allowed_paths = task_spec.get('allowed_paths', [])
+    is_template = (
+        'template' in task_id or 
+        'template' in title.lower() or 
+        any('templates/' in path for path in allowed_paths)
+    )
+    
+    if is_template:
+        lines.extend(_generate_template_content(task_spec))
+    elif 'operating-rules' in task_id or 'rules' in title.lower():
         lines.extend(_generate_operating_rules_content(task_spec))
     elif 'runbook' in task_id or 'runbook' in title.lower():
         lines.extend(_generate_runbook_content(task_spec))
@@ -149,6 +158,112 @@ def _generate_doc_content(task_spec: Dict[str, Any]) -> str:
     lines.append("")
     
     return "\n".join(lines)
+
+
+def _generate_template_content(task_spec: Dict[str, Any]) -> List[str]:
+    """Generate content for template documents (e.g., PR templates)."""
+    lines = []
+    task_id = task_spec.get('id', 'unknown')
+    acceptance_criteria = task_spec.get('acceptance_criteria', [])
+    allowed_paths = task_spec.get('allowed_paths', [])
+    scope = task_spec.get('scope', 'unknown')
+    
+    # Detect if this is a PR template
+    is_pr_template = 'pr' in task_id.lower() or any('pr' in criterion.lower() for criterion in acceptance_criteria)
+    
+    if is_pr_template:
+        lines.append("## Task Information")
+        lines.append("")
+        lines.append("**Task ID:** `<TASK_ID>`")
+        lines.append("")
+        lines.append("**Attempt ID:** `<ATTEMPT_ID>`")
+        lines.append("")
+        lines.append("## Scope")
+        lines.append("")
+        lines.append(f"**Scope:** `{scope}`")
+        lines.append("")
+        lines.append("**Allowed Paths:**")
+        if allowed_paths:
+            for path in allowed_paths:
+                lines.append(f"- `{path}`")
+        else:
+            lines.append("- All paths (use with caution)")
+        lines.append("")
+        lines.append("## Summary")
+        lines.append("")
+        lines.append("<!-- Brief description of what this PR does -->")
+        lines.append("")
+        lines.append("<SUMMARY>")
+        lines.append("")
+        lines.append("## Acceptance Criteria")
+        lines.append("")
+        if acceptance_criteria:
+            for criterion in acceptance_criteria:
+                lines.append(f"- [ ] {criterion}")
+        else:
+            lines.append("- [ ] Task requirements met")
+        lines.append("")
+        lines.append("## Testing / Evidence")
+        lines.append("")
+        lines.append("**Commands run:**")
+        lines.append("```bash")
+        lines.append("# Add commands used to verify changes")
+        lines.append("<COMMANDS>")
+        lines.append("```")
+        lines.append("")
+        lines.append("**Expected output:**")
+        lines.append("```")
+        lines.append("<EXPECTED_OUTPUT>")
+        lines.append("```")
+        lines.append("")
+        lines.append("**Actual output:**")
+        lines.append("```")
+        lines.append("<ACTUAL_OUTPUT>")
+        lines.append("```")
+        lines.append("")
+        lines.append("## Risk Assessment")
+        lines.append("")
+        lines.append("**Risk Level:** `<low|medium|high>`")
+        lines.append("")
+        lines.append("**Potential Impact:**")
+        lines.append("- <IMPACT_DESCRIPTION>")
+        lines.append("")
+        lines.append("**Rollback Plan:**")
+        lines.append("```bash")
+        lines.append("# Commands to rollback if needed")
+        lines.append("<ROLLBACK_COMMANDS>")
+        lines.append("```")
+        lines.append("")
+        lines.append("## Links")
+        lines.append("")
+        lines.append("- **Control Plane:** `<CONTROL_PLANE_URL>`")
+        lines.append("- **Console:** `<CONSOLE_URL>`")
+        lines.append("- **Backlog Task:** `.leviathan/backlog.yaml#<TASK_ID>`")
+        lines.append("")
+    else:
+        # Generic template content
+        lines.append("## Template Structure")
+        lines.append("")
+        lines.append("This template provides a structured format for:")
+        lines.append("")
+        if acceptance_criteria:
+            for criterion in acceptance_criteria:
+                lines.append(f"- {criterion}")
+        lines.append("")
+        lines.append("## Usage")
+        lines.append("")
+        lines.append("Replace placeholders marked with `<PLACEHOLDER>` with actual values.")
+        lines.append("")
+        lines.append("## Sections")
+        lines.append("")
+        if acceptance_criteria:
+            for i, criterion in enumerate(acceptance_criteria, 1):
+                lines.append(f"### {i}. {criterion}")
+                lines.append("")
+                lines.append("<CONTENT>")
+                lines.append("")
+    
+    return lines
 
 
 def _generate_operating_rules_content(task_spec: Dict[str, Any]) -> List[str]:

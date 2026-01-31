@@ -63,6 +63,95 @@ def test_validate_output_path_outside_repo():
             )
 
 
+def test_validate_output_path_boundary_safe_docs():
+    """Test boundary-safe validation: docs/ should not match docs2/."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Should allow docs/file.md
+        validate_output_path("docs/file.md", ["docs/"], tmpdir)
+        
+        # Should reject docs2/file.md
+        with pytest.raises(PathViolationError):
+            validate_output_path("docs2/file.md", ["docs/"], tmpdir)
+
+
+def test_validate_output_path_boundary_safe_tests():
+    """Test boundary-safe validation: tests/ should not match testss/."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Should allow tests/unit/test.py
+        validate_output_path("tests/unit/test.py", ["tests/"], tmpdir)
+        
+        # Should reject testss/test.py
+        with pytest.raises(PathViolationError):
+            validate_output_path("testss/test.py", ["tests/"], tmpdir)
+
+
+def test_validate_output_path_boundary_safe_nested():
+    """Test boundary-safe validation with nested directories."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Should allow tests/unit/file.py with tests/unit/ prefix
+        validate_output_path("tests/unit/file.py", ["tests/unit/"], tmpdir)
+        
+        # Should reject tests/unit2/file.py
+        with pytest.raises(PathViolationError):
+            validate_output_path("tests/unit2/file.py", ["tests/unit/"], tmpdir)
+        
+        # Should reject tests/unittest/file.py
+        with pytest.raises(PathViolationError):
+            validate_output_path("tests/unittest/file.py", ["tests/unit/"], tmpdir)
+
+
+def test_validate_output_path_exact_file_match():
+    """Test exact file path matching."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Should allow exact match
+        validate_output_path("docs/README.md", ["docs/README.md"], tmpdir)
+        
+        # Should reject different file
+        with pytest.raises(PathViolationError):
+            validate_output_path("docs/OTHER.md", ["docs/README.md"], tmpdir)
+        
+        # Should reject file in subdirectory with same name
+        with pytest.raises(PathViolationError):
+            validate_output_path("docs/sub/README.md", ["docs/README.md"], tmpdir)
+
+
+def test_validate_output_path_mixed_allowed_paths():
+    """Test validation with mixed directory prefixes and exact files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        allowed = ["docs/", "tests/unit/test_specific.py", ".leviathan/"]
+        
+        # Should allow docs/ prefix
+        validate_output_path("docs/guide.md", allowed, tmpdir)
+        validate_output_path("docs/sub/file.md", allowed, tmpdir)
+        
+        # Should allow exact test file
+        validate_output_path("tests/unit/test_specific.py", allowed, tmpdir)
+        
+        # Should allow .leviathan/ prefix
+        validate_output_path(".leviathan/backlog.yaml", allowed, tmpdir)
+        
+        # Should reject tests/unit/other.py (not exact match)
+        with pytest.raises(PathViolationError):
+            validate_output_path("tests/unit/other.py", allowed, tmpdir)
+        
+        # Should reject docs2/file.md (boundary violation)
+        with pytest.raises(PathViolationError):
+            validate_output_path("docs2/file.md", allowed, tmpdir)
+
+
+def test_validate_output_path_no_trailing_slash():
+    """Test that directory prefixes without trailing slash still work."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Even without trailing slash, should work for directories
+        # But this is NOT recommended - the function expects trailing slash for dirs
+        # This test documents current behavior
+        allowed = ["docs"]  # No trailing slash
+        
+        # This will be treated as exact file match, so should reject
+        with pytest.raises(PathViolationError):
+            validate_output_path("docs/file.md", allowed, tmpdir)
+
+
 def test_execute_docs_task_backlog_guide():
     """Test execution of docs-leviathan-backlog-guide task (now uses generic executor)."""
     with tempfile.TemporaryDirectory() as tmpdir:

@@ -30,7 +30,9 @@ def validate_output_path(file_path: str, allowed_paths: List[str], repo_root: st
     
     Args:
         file_path: Absolute or relative path to validate
-        allowed_paths: List of allowed path prefixes (e.g., ["docs/", ".leviathan/"])
+        allowed_paths: List of allowed path prefixes or exact file paths
+                      Directory prefixes should end with "/" (e.g., "docs/", "tests/unit/")
+                      Exact file paths should not end with "/" (e.g., "docs/README.md")
         repo_root: Absolute path to repository root
         
     Raises:
@@ -46,11 +48,30 @@ def validate_output_path(file_path: str, allowed_paths: List[str], repo_root: st
     except ValueError:
         raise PathViolationError(f"Path {file_path} is outside repository root")
     
-    # Check if path starts with any allowed prefix
-    rel_path_str = str(rel_path)
+    # Normalize to POSIX style for consistent comparison
+    rel_path_str = rel_path.as_posix()
+    
+    # Check if path matches any allowed pattern
     for allowed in allowed_paths:
-        if rel_path_str.startswith(allowed.rstrip('/')):
-            return
+        # Normalize to POSIX but preserve trailing slash for directories
+        # Path.as_posix() strips trailing slashes, so we need to handle this manually
+        allowed_normalized = allowed.replace('\\', '/')
+        
+        if allowed_normalized.endswith('/'):
+            # Directory prefix - check boundary-safe prefix match
+            # Ensure we match "docs/" against "docs/file.md" but NOT "docs2/file.md"
+            # Since allowed_normalized ends with "/", startswith is boundary-safe
+            if rel_path_str.startswith(allowed_normalized):
+                return
+            # Also check if the path IS the directory itself (without trailing slash)
+            # e.g., allowed="docs/", path="docs" should match
+            if rel_path_str + '/' == allowed_normalized:
+                return
+        else:
+            # Exact file path match - normalize both sides
+            allowed_posix = Path(allowed).as_posix()
+            if rel_path_str == allowed_posix:
+                return
     
     raise PathViolationError(
         f"Path {rel_path_str} is outside allowed_paths: {allowed_paths}"

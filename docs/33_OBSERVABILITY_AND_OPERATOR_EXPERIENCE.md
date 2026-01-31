@@ -103,16 +103,16 @@ Control Plane ──(event stream)──> Spider Node
 
 **Deployment:**
 - Kubernetes Deployment (1 replica)
-- Port 3000
+- Port 8080
 - No persistent storage (queries control plane)
 
 **Access:**
 ```bash
 # Port-forward to access locally
-kubectl -n leviathan port-forward svc/leviathan-console 3000:3000
+kubectl -n leviathan port-forward svc/leviathan-console 8080:8080
 
 # Open in browser
-open http://localhost:3000
+open http://localhost:8080
 ```
 
 **Current State (v1):**

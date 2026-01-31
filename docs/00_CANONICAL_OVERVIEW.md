@@ -101,16 +101,26 @@ kubectl apply -k ops/k8s/overlays/eks
    - Submits worker jobs to Kubernetes
 
 2. **Worker** (`leviathan.executor.backlog_propose_worker`)
-   - Runs as Kubernetes Job (one per task attempt)
-   - Clones target repo, modifies backlog, creates PR
-   - Posts lifecycle events to control plane
-   - Exits after PR creation
+   - Executes tasks with scope-based executors (docs, tests)
+   - Modifies files per task specification
+   - Backlog writeback: marks tasks completed in same PR
+   - Creates PR with changes
+   - Posts events to control plane
 
 3. **Control Plane** (`leviathan.control_plane`)
-   - FastAPI service (Deployment)
    - Ingests events from workers
    - Persists event history (NDJSON backend)
    - Provides query API for graph state
+
+4. **Spider Node** (`leviathan.spider`)
+   - Observability service (port 8001)
+   - Health check and Prometheus metrics endpoints
+   - v1: Static metrics; v2: Control plane integration
+
+5. **Operator Console** (`leviathan.operator_console`)
+   - Web UI for human operators (port 8080)
+   - Event stream visualization
+   - Graph state display
 
 ---
 

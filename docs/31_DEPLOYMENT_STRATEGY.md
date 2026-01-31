@@ -200,7 +200,7 @@ kubectl -n leviathan get services
 
 ```bash
 # Port-forward (temporary)
-kubectl -n leviathan port-forward svc/leviathan-console 3000:3000
+kubectl -n leviathan port-forward svc/leviathan-console 8080:8080
 
 # Or configure LoadBalancer (requires MetalLB or cloud provider)
 # Or use Elastic IP + nginx ingress
@@ -564,7 +564,7 @@ kubectl apply -f ops/k8s/monitoring/spider-servicemonitor.yaml
 - [30_LEVIATHAN_ROADMAP.md](30_LEVIATHAN_ROADMAP.md) - Strategic roadmap
 - [00_CANONICAL_OVERVIEW.md](00_CANONICAL_OVERVIEW.md) - System overview
 - [01_QUICKSTART.md](01_QUICKSTART.md) - Local development quickstart
-- [24_EKS_DEPLOYMENT_EVIDENCE.md](24_EKS_DEPLOYMENT_EVIDENCE.md) - EKS deployment evidence
+- [archive/24_EKS_DEPLOYMENT_EVIDENCE.md](archive/24_EKS_DEPLOYMENT_EVIDENCE.md) - EKS deployment evidence (archived)
 
 ---
 

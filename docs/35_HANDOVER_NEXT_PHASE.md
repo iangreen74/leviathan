@@ -213,28 +213,53 @@ Leviathan Autonomy v1 is **operational and stable**. The system continuously exe
 
 ## Next Engineering Tasks (Priority Order)
 
-### Task 1: Provision AWS EC2 Instance
+### Task 1: Bootstrap Terraform Backend (One-Time)
 
-**Goal:** Deploy Leviathan to AWS for first production deployment.
+**Goal:** Set up S3 + DynamoDB backend for Terraform state management.
 
 **Steps:**
-1. Provision EC2 instance (t3.medium, Ubuntu 22.04)
-2. Configure security groups (SSH, HTTPS, K8s API)
-3. Attach Elastic IP (optional, for stable console access)
-4. Configure IAM role for Secrets Manager access
+1. Go to Actions tab in GitHub
+2. Run `infra-bootstrap-backend` workflow
+3. Input AWS account ID and region
+4. Add output secrets to repository settings
 
 **Acceptance Criteria:**
-- EC2 instance running and accessible via SSH
-- Security groups configured correctly
-- IAM role attached
+- S3 bucket created for Terraform state
+- DynamoDB table created for state locking
+- Secrets added: `TF_BACKEND_BUCKET`, `TF_BACKEND_DYNAMODB_TABLE`
 
-**Estimated Time:** 30 minutes
+**Estimated Time:** 15 minutes
 
-**Reference:** [31_DEPLOYMENT_STRATEGY.md](31_DEPLOYMENT_STRATEGY.md)
+**Reference:** [31_DEPLOYMENT_STRATEGY.md](31_DEPLOYMENT_STRATEGY.md#infrastructure-via-github-actions-terraform)
 
 ---
 
-### Task 2: Install k3s on EC2
+### Task 2: Provision AWS EC2 Instance via Terraform
+
+**Goal:** Deploy EC2 infrastructure for k3s using Terraform workflows.
+
+**Steps:**
+1. Create `infra/leviathan_k3s_ec2/terraform.tfvars` with your values
+2. Create PR with tfvars changes
+3. Review Terraform plan in PR comments
+4. Merge PR after plan review
+5. Run `infra-leviathan-k3s-apply` workflow manually
+6. Type "apply" to confirm
+7. Approve in GitHub Environment (if configured)
+
+**Acceptance Criteria:**
+- EC2 instance running (t3.medium, Ubuntu 22.04)
+- Security groups configured (SSH, k8s API, console from operator CIDR)
+- IAM role attached with Secrets Manager access
+- SSH access working
+
+**Estimated Time:** 30 minutes (plus approval wait time)
+
+**Reference:** [31_DEPLOYMENT_STRATEGY.md](31_DEPLOYMENT_STRATEGY.md), `infra/leviathan_k3s_ec2/README.md`
+
+---
+
+### Task 3: Install k3s on EC2 (Phase 2)
 
 **Goal:** Set up single-node Kubernetes cluster.
 
@@ -254,21 +279,23 @@ Leviathan Autonomy v1 is **operational and stable**. The system continuously exe
 
 **Reference:** [31_DEPLOYMENT_STRATEGY.md](31_DEPLOYMENT_STRATEGY.md)
 
+**Note:** k3s installation is Phase 2 (not automated in current PR)
+
 ---
 
-### Task 3: Configure AWS Secrets Manager
+### Task 4: Configure AWS Secrets Manager
 
 **Goal:** Store GitHub token and control plane token securely.
 
 **Steps:**
-1. Create secret for GitHub token
-2. Create secret for control plane token
-3. Configure IAM permissions
+1. Create secret `leviathan/github-token` in AWS Secrets Manager
+2. Create secret `leviathan/control-plane-token` in AWS Secrets Manager
+3. Verify IAM instance profile has read access (already configured by Terraform)
 4. Test secret retrieval from EC2
 
 **Acceptance Criteria:**
 - Secrets stored in AWS Secrets Manager
-- EC2 instance can retrieve secrets
+- EC2 instance can retrieve secrets via IAM role
 - Secrets not hardcoded anywhere
 
 **Estimated Time:** 20 minutes
@@ -277,7 +304,7 @@ Leviathan Autonomy v1 is **operational and stable**. The system continuously exe
 
 ---
 
-### Task 4: Build and Push Docker Images
+### Task 5: Build and Push Docker Images
 
 **Goal:** Make Leviathan images available for k3s deployment.
 
@@ -297,7 +324,7 @@ Leviathan Autonomy v1 is **operational and stable**. The system continuously exe
 
 ---
 
-### Task 5: Deploy Leviathan to k3s
+### Task 6: Deploy Leviathan to k3s
 
 **Goal:** Deploy all Leviathan components to k3s cluster.
 
@@ -321,7 +348,7 @@ Leviathan Autonomy v1 is **operational and stable**. The system continuously exe
 
 ---
 
-### Task 6: Validate Console Access
+### Task 7: Validate Console Access
 
 **Goal:** Ensure console is accessible and functional.
 
@@ -333,7 +360,7 @@ Leviathan Autonomy v1 is **operational and stable**. The system continuously exe
 5. Verify graph visualization works
 
 **Acceptance Criteria:**
-- Console accessible via browser
+- Console accessible via browser (port 8080)
 - Dashboard shows system status
 - No errors in console logs
 
@@ -343,7 +370,7 @@ Leviathan Autonomy v1 is **operational and stable**. The system continuously exe
 
 ---
 
-### Task 7: Prepare Cognito OIDC Path (Future)
+### Task 8: Prepare Cognito OIDC Path (Future)
 
 **Goal:** Plan authentication for console and control plane.
 

@@ -1,6 +1,6 @@
 # Architecture
 
-**Last Updated:** 2026-01-28  
+**Last Updated:** 2026-01-31  
 **Status:** Canonical
 
 ---
@@ -57,6 +57,161 @@ Leviathan is a closed-loop autonomous software engineering system that executes 
  │   - Check open PRs   │
  └──────────────────────┘
 ```
+
+---
+
+## As Built (Autonomy v1)
+
+**Current State:** Leviathan Autonomy v1 is operational and executing tasks autonomously in production.
+
+### Scheduler (CronJob)
+- Runs every 5 minutes
+- Checks open PR count via GitHub API
+- Clones target repo and reads `.leviathan/backlog.yaml`
+- Selects next ready task (with `ready: true`, `status: pending`, no blocking dependencies)
+- Validates `allowed_paths` against policy (boundary-safe enforcement)
+- Submits Kubernetes Job for worker execution
+- Enforces guardrails: max open PRs, retry limits, circuit breaker
+
+### Worker (Job)
+- Executes tasks with scope-based executors:
+  - **Docs executor:** Generates markdown documentation from task specs (generic, works for any doc task)
+  - **Tests executor v1:** Generates pytest test stubs from acceptance criteria
+- Clones target repo, modifies files per task spec
+- **Backlog completion writeback:** Updates `.leviathan/backlog.yaml` in same PR
+  - Sets `status: completed`, `ready: false`
+  - Records attempt metadata (attempt_id, branch_name, completed_at)
+  - Prevents infinite re-execution
+- Creates PR to target repo with all changes
+- Posts events to control plane (attempt lifecycle, PR creation)
+
+### Control Plane
+- Source-of-truth event log (NDJSON backend)
+- Query API for graph state and event history
+- Autonomy status endpoint (`/v1/autonomy/status`)
+- Ingests events from workers via `/v1/events/ingest`
+
+### Spider Node v1
+- Standalone observability service (port 8001)
+- Health check endpoint (`/health`)
+- Prometheus metrics endpoint (`/metrics`)
+- **v1 limitation:** Metrics are static (no control plane integration yet)
+- **v2 plan:** Integrate with control plane event stream for real-time metrics
+
+### Operator Console
+- Human-facing observability UI (port 8080)
+- Queries control plane for graph state
+- Event stream visualization
+- Target and task status display
+- No authentication (internal use only in v1)
+
+### Key Capabilities
+- ✅ Open-PR latch: Scheduler respects max open PRs
+- ✅ Dependency handling: Tasks with dependencies are skipped
+- ✅ Boundary-safe path validation: Prevents `docs/` matching `docs2/`
+- ✅ Backlog writeback: Prevents re-execution of completed tasks
+- ✅ Circuit breaker: Stops after consecutive failures
+- ✅ Full event audit trail: All actions logged to control plane
+
+---
+
+## Execution Contract
+
+Leviathan operates under strict invariants that define its execution model:
+
+### 1. PR-Based Delivery (Always)
+- All changes delivered via GitHub pull requests
+- No direct commits to main branches
+- No auto-merge (unless explicitly configured per target in future)
+- Human review is the final gate
+
+### 2. No Autonomous Planning (Never)
+- Leviathan does NOT invent, create, or prioritize tasks
+- Human operators define the backlog
+- Leviathan executes tasks with `ready: true`
+- Clear separation of planning (human) and execution (Leviathan)
+
+### 3. Policy-Bounded Autonomy (Enforced)
+- Every target has a policy defining:
+  - `allowed_path_prefixes`: Scope restrictions (e.g., `.leviathan/`, `docs/`, `tests/`)
+  - `max_open_prs`: Concurrency limit
+  - `max_attempts_per_task`: Retry limit
+  - `circuit_breaker_failures`: Consecutive failure threshold
+- Violations halt execution immediately
+- No escape hatches or policy bypass
+
+### 4. Determinism and Audit Trail (Required)
+- Same task + same repo state = same output
+- Full event history persisted in control plane
+- Every action produces structured events
+- Reproducible and auditable
+
+---
+
+## AWS Substrate
+
+Leviathan is substrate-agnostic via Kustomize overlays, supporting multiple deployment targets:
+
+### Local Development (kind)
+- Single-node Kubernetes in Docker
+- Fast iteration cycle, no cloud costs
+- Full feature parity with production
+- Overlay: `ops/k8s/overlays/kind`
+
+### EC2 + k3s (Preferred First AWS Deployment)
+- **Why:** Cost-effective (~$35/month vs ~$170/month for EKS)
+- **Why:** Operationally simple (single-node, full control)
+- **Why:** Sufficient for 10+ targets, 100+ PRs/day
+- Single EC2 instance (t3.medium) running k3s
+- Persistent EBS volume for event store
+- AWS Secrets Manager for credentials
+- Clear upgrade path to EKS when needed
+- Overlay: `ops/k8s/overlays/aws-k3s` (future)
+
+### AWS EKS (Managed Kubernetes for Scale)
+- Multi-node cluster with managed control plane
+- Auto-scaling, high availability, multi-AZ
+- Suitable for 50+ targets, high-volume production
+- Higher cost but lower operational burden
+- Overlay: `ops/k8s/overlays/eks`
+
+**Key Insight:** Kustomize overlays make substrates interchangeable. Same base manifests, different overlays for different environments.
+
+---
+
+## Multi-Target and Multi-Tenant
+
+### Multi-Target (Near-Term Product Unlock)
+**Status:** Architecture exists, not yet operational (hardcoded to single target in v1)
+
+**Concept:** Leviathan manages multiple target repositories simultaneously, each with:
+- Per-target backlog (`.leviathan/backlog.yaml` in each repo)
+- Per-target policy (`.leviathan/policy.yaml` or platform defaults)
+- Per-target secrets (GitHub tokens, credentials)
+
+**Scheduler Evolution:**
+- v1: Hardcoded to `iangreen74/radix`
+- v2: Query control plane for active targets, select tasks across targets
+- Priority-based scheduling with fairness weights
+- Per-target state tracking (active, idle, blocked, paused)
+
+**See:** [32_MULTI_TARGET_ARCHITECTURE.md](32_MULTI_TARGET_ARCHITECTURE.md) for detailed design
+
+### Multi-Tenant (Phase 2/3 - Future)
+**Status:** Not implemented, planned for SaaS product launch
+
+**Concept:** Multiple customers using shared Leviathan platform with isolation:
+- Namespace-based isolation (one namespace per customer)
+- Per-customer secrets and credentials
+- RBAC and OIDC authentication (AWS Cognito)
+- Usage metering and billing
+- Rate limiting and quotas
+
+**Key Difference:**
+- **Multi-target:** Multiple repos, single operator (internal use)
+- **Multi-tenant:** Multiple customers, each with multiple repos (SaaS)
+
+**See:** [30_LEVIATHAN_ROADMAP.md](30_LEVIATHAN_ROADMAP.md) for phased rollout plan
 
 ---
 

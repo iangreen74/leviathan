@@ -43,7 +43,7 @@ Leviathan Autonomy v1 is **operational and stable**. The system continuously exe
    - No control plane integration yet
 
 5. **Operator Console**
-   - Web UI on port 3000
+   - Web UI on port 8080
    - Event stream visualization
    - Graph state display
    - No authentication (internal use only)

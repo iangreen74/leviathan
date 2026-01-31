@@ -203,6 +203,74 @@ def test_generate_doc_content_generic():
     assert 'Criterion 2' in content
 
 
+def test_generate_doc_content_pr_template():
+    """Test content generation for PR template task."""
+    task_spec = {
+        'id': 'agent-pr-template',
+        'title': 'Create agent PR description template',
+        'scope': 'docs',
+        'allowed_paths': ['docs/templates/AGENT_PR_TEMPLATE.md'],
+        'acceptance_criteria': [
+            'Template includes task_id reference',
+            'Template includes acceptance criteria checklist',
+            'Template includes scope declaration'
+        ]
+    }
+    
+    content = _generate_doc_content(task_spec)
+    
+    # Should detect as template
+    assert 'Task Information' in content
+    assert '<TASK_ID>' in content
+    assert '<ATTEMPT_ID>' in content
+    
+    # Should have checkboxes for acceptance criteria
+    assert '- [ ] Template includes task_id reference' in content
+    assert '- [ ] Template includes acceptance criteria checklist' in content
+    
+    # Should have structured sections
+    assert '## Scope' in content
+    assert '## Summary' in content
+    assert '## Testing / Evidence' in content
+    assert '## Risk Assessment' in content
+    assert '## Links' in content
+    
+    # Should NOT have placeholder content
+    assert '[Content to be added]' not in content
+    
+    # Should have usable placeholders
+    assert '<SUMMARY>' in content
+    assert '<COMMANDS>' in content
+    assert '<CONTROL_PLANE_URL>' in content
+
+
+def test_generate_doc_content_generic_template():
+    """Test content generation for generic template (not PR)."""
+    task_spec = {
+        'id': 'config-template',
+        'title': 'Create configuration template',
+        'scope': 'docs',
+        'allowed_paths': ['docs/templates/config.yaml'],
+        'acceptance_criteria': [
+            'Template includes required fields',
+            'Template includes examples'
+        ]
+    }
+    
+    content = _generate_doc_content(task_spec)
+    
+    # Should detect as template
+    assert 'Template Structure' in content
+    assert 'Usage' in content
+    
+    # Should have acceptance criteria
+    assert 'Template includes required fields' in content
+    assert 'Template includes examples' in content
+    
+    # Should NOT have placeholder content
+    assert '[Content to be added]' not in content
+
+
 def test_execute_docs_task_generic_with_explicit_path():
     """Test generic docs execution with explicit file path."""
     with tempfile.TemporaryDirectory() as tmpdir:

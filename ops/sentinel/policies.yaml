@@ -1,0 +1,99 @@
+# Sentinel-style Policy Definitions for Leviathan Infrastructure
+# These policies are enforced at CI time to prevent misconfigurations
+
+policies:
+  # Terraform provider version pinning
+  - id: terraform-provider-pinned
+    name: Terraform providers must be pinned
+    description: All Terraform providers must specify exact or constrained versions
+    severity: error
+    scope: terraform
+    rule: |
+      All required_providers blocks must specify a version constraint.
+      No provider may use version = "latest" or omit version entirely.
+    
+  # Security group ingress restrictions
+  - id: no-public-ingress-restricted-ports
+    name: No 0.0.0.0/0 ingress on restricted ports
+    description: Ports 22, 6443, 8080 must not allow ingress from 0.0.0.0/0
+    severity: error
+    scope: terraform
+    restricted_ports: [22, 6443, 8080]
+    rule: |
+      Security group ingress rules for ports 22, 6443, 8080 must not
+      include cidr_blocks containing "0.0.0.0/0" or "::/0".
+  
+  # EC2 instance type validation
+  - id: ec2-instance-type-allowed
+    name: EC2 instance type must be in allowed list
+    description: Only approved instance types may be used
+    severity: error
+    scope: terraform
+    allowed_instance_types:
+      - t3.small
+      - t3.medium
+      - t3.large
+    rule: |
+      EC2 instance_type must be one of: t3.small, t3.medium, t3.large.
+      Override requires explicit justification in tfvars comment.
+  
+  # EBS volume requirements
+  - id: ebs-volume-requirements
+    name: Root volume must be gp3 >= 20GB
+    description: EBS root volumes must use gp3 type and be at least 20GB
+    severity: error
+    scope: terraform
+    rule: |
+      root_block_device must specify:
+      - volume_type = "gp3"
+      - volume_size >= 20
+  
+  # S3 bucket public access
+  - id: no-public-s3-buckets
+    name: No public S3 buckets
+    description: S3 buckets must not allow public access
+    severity: error
+    scope: terraform
+    rule: |
+      S3 buckets must not have:
+      - acl = "public-read" or "public-read-write"
+      - public_access_block disabled
+  
+  # IAM policy restrictions
+  - id: no-wildcard-iam-policies
+    name: No wildcard IAM policies
+    description: IAM policies must not use "*" for both actions and resources
+    severity: error
+    scope: terraform
+    exceptions:
+      - Read-only SecretsManager access with specific resource ARNs
+    rule: |
+      IAM policy statements must not have:
+      - Action = "*" AND Resource = "*"
+      Exception: Read-only actions (Get*, Describe*, List*) with specific ARNs.
+  
+  # Encryption requirements
+  - id: ebs-encryption-required
+    name: EBS volumes must be encrypted
+    description: All EBS volumes must have encryption enabled
+    severity: error
+    scope: terraform
+    rule: |
+      root_block_device and ebs_block_device must specify:
+      - encrypted = true
+  
+  # Terraform state backend
+  - id: terraform-backend-required
+    name: Terraform backend must be configured
+    description: Terraform must use remote backend (S3 + DynamoDB)
+    severity: warning
+    scope: terraform
+    rule: |
+      Terraform configuration must include backend "s3" block.
+      Local state is not allowed for production infrastructure.
+
+metadata:
+  version: "1.0.0"
+  last_updated: "2026-01-31"
+  enforcement: ci
+  documentation: docs/31_DEPLOYMENT_STRATEGY.md

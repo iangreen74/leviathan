@@ -1,0 +1,132 @@
+name: Infra - Leviathan k3s EC2 Apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_apply:
+        description: 'Type "apply" to confirm infrastructure changes'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    environment: production  # Requires approval in GitHub Environment settings
+    
+    steps:
+      - name: Validate Confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm_apply }}" != "apply" ]; then
+            echo "❌ Confirmation failed. You must type 'apply' to proceed."
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main  # Always apply from main branch
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+
+      - name: Configure AWS credentials (OIDC)
+        id: aws-oidc
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-west-2' }}
+
+      - name: Configure AWS credentials (fallback)
+        if: steps.aws-oidc.outcome == 'failure'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-west-2' }}
+
+      - name: Terraform Init
+        working-directory: infra/leviathan_k3s_ec2
+        run: |
+          if [ -n "${{ secrets.TF_BACKEND_BUCKET }}" ]; then
+            terraform init \
+              -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
+              -backend-config="key=leviathan-k3s-ec2/terraform.tfstate" \
+              -backend-config="region=${{ secrets.AWS_REGION || 'us-west-2' }}" \
+              -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE || 'leviathan-terraform-locks' }}" \
+              -backend-config="encrypt=true"
+          else
+            echo "❌ Backend not configured. Run backend bootstrap workflow first."
+            exit 1
+          fi
+
+      - name: Terraform Plan (Pre-Apply)
+        working-directory: infra/leviathan_k3s_ec2
+        run: |
+          terraform plan -out=tfplan.binary
+          terraform show -no-color tfplan.binary > tfplan.txt
+
+      - name: Terraform Apply
+        working-directory: infra/leviathan_k3s_ec2
+        run: terraform apply -auto-approve tfplan.binary
+
+      - name: Generate Apply Evidence
+        if: success()
+        working-directory: infra/leviathan_k3s_ec2
+        run: |
+          terraform output -json > outputs.json
+          
+          cat > APPLY_EVIDENCE.md << 'EOF'
+          # Terraform Apply Evidence
+          
+          **Applied:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Commit:** ${{ github.sha }}
+          **Triggered by:** ${{ github.actor }}
+          
+          ## Outputs
+          
+          \`\`\`json
+          $(cat outputs.json)
+          \`\`\`
+          
+          ## Next Steps
+          
+          1. SSH into instance: \`ssh ubuntu@$(terraform output -raw instance_public_ip)\`
+          2. Install k3s (see Phase 2 documentation)
+          3. Deploy Leviathan components
+          
+          ## Rollback
+          
+          To destroy infrastructure (manual only):
+          \`\`\`bash
+          cd infra/leviathan_k3s_ec2
+          terraform destroy
+          \`\`\`
+          
+          **WARNING:** Ensure backups exist before destroying.
+          EOF
+
+      - name: Upload Apply Evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-apply-${{ github.sha }}
+          path: |
+            infra/leviathan_k3s_ec2/tfplan.txt
+            infra/leviathan_k3s_ec2/outputs.json
+            infra/leviathan_k3s_ec2/APPLY_EVIDENCE.md
+          retention-days: 90
+
+      - name: Notify Success
+        if: success()
+        run: |
+          echo "✅ Infrastructure successfully applied!"
+          echo "📋 Evidence uploaded to workflow artifacts"
+          echo "🔗 SSH command: ssh ubuntu@$(cd infra/leviathan_k3s_ec2 && terraform output -raw instance_public_ip)"

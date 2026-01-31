@@ -1,0 +1,192 @@
+name: Infra - Leviathan k3s EC2 Plan
+
+on:
+  pull_request:
+    paths:
+      - 'infra/leviathan_k3s_ec2/**'
+      - '.github/workflows/infra-leviathan-k3s-plan.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+
+      - name: Configure AWS credentials (OIDC)
+        id: aws-oidc
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-west-2' }}
+
+      - name: Configure AWS credentials (fallback)
+        if: steps.aws-oidc.outcome == 'failure'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-west-2' }}
+
+      - name: Terraform Format Check
+        id: fmt
+        working-directory: infra/leviathan_k3s_ec2
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        working-directory: infra/leviathan_k3s_ec2
+        run: |
+          if [ -n "${{ secrets.TF_BACKEND_BUCKET }}" ]; then
+            terraform init \
+              -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
+              -backend-config="key=leviathan-k3s-ec2/terraform.tfstate" \
+              -backend-config="region=${{ secrets.AWS_REGION || 'us-west-2' }}" \
+              -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE || 'leviathan-terraform-locks' }}" \
+              -backend-config="encrypt=true"
+          else
+            echo "⚠️ Backend not configured. Run backend bootstrap workflow first."
+            echo "See infra/leviathan_k3s_ec2/backend/README.md for instructions."
+            exit 1
+          fi
+
+      - name: Terraform Validate
+        id: validate
+        working-directory: infra/leviathan_k3s_ec2
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: infra/leviathan_k3s_ec2
+        run: |
+          terraform plan -no-color -out=tfplan.binary
+          terraform show -no-color tfplan.binary > tfplan.txt
+          terraform show -json tfplan.binary > tfplan.json
+        continue-on-error: true
+
+      - name: Generate Evidence Report
+        if: steps.plan.outcome == 'success'
+        working-directory: infra/leviathan_k3s_ec2
+        run: |
+          cat > EVIDENCE.md << 'EOF'
+          # Terraform Plan Evidence
+          
+          **Generated:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **PR:** ${{ github.event.pull_request.number }}
+          **Commit:** ${{ github.sha }}
+          
+          ## Resources to be Created/Modified
+          
+          \`\`\`
+          $(terraform show -no-color tfplan.binary | grep -A 100 "Terraform will perform")
+          \`\`\`
+          
+          ## Security Configuration
+          
+          ### Ingress Rules
+          - Port 22 (SSH): Restricted to operator CIDRs
+          - Port 6443 (Kubernetes API): Restricted to operator CIDRs
+          - Port 8080 (Console): Restricted to operator CIDRs
+          - Egress: All traffic allowed
+          
+          ### IAM Permissions
+          - SecretsManager:GetSecretValue on leviathan/github-token
+          - SecretsManager:GetSecretValue on leviathan/control-plane-token
+          - SecretsManager:DescribeSecret on above secrets
+          
+          ### Encryption
+          - Root volume: Encrypted (AWS-managed keys)
+          - Terraform state: Encrypted in S3
+          
+          ## Cost Estimate (Monthly)
+          - EC2 t3.medium (on-demand, us-west-2): ~$30.40
+          - EBS 30GB gp3: ~$2.40
+          - Data transfer: ~$1-5
+          - **Total: ~$35/month**
+          
+          ## Plan Summary
+          
+          \`\`\`json
+          $(cat tfplan.json | jq '{
+            format_version,
+            terraform_version,
+            resource_changes: [.resource_changes[] | {
+              address,
+              type,
+              change: {
+                actions: .change.actions
+              }
+            }]
+          }')
+          \`\`\`
+          EOF
+
+      - name: Upload Plan Artifacts
+        if: steps.plan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ github.sha }}
+          path: |
+            infra/leviathan_k3s_ec2/tfplan.binary
+            infra/leviathan_k3s_ec2/tfplan.txt
+            infra/leviathan_k3s_ec2/tfplan.json
+            infra/leviathan_k3s_ec2/EVIDENCE.md
+          retention-days: 30
+
+      - name: Comment PR with Plan
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('infra/leviathan_k3s_ec2/tfplan.txt', 'utf8');
+            const evidence = fs.readFileSync('infra/leviathan_k3s_ec2/EVIDENCE.md', 'utf8');
+            
+            const output = `## Terraform Plan Results
+            
+            #### Format Check: \`${{ steps.fmt.outcome }}\`
+            #### Initialization: \`${{ steps.init.outcome }}\`
+            #### Validation: \`${{ steps.validate.outcome }}\`
+            #### Plan: \`${{ steps.plan.outcome }}\`
+            
+            <details><summary>Show Plan</summary>
+            
+            \`\`\`terraform
+            ${plan.slice(0, 60000)}
+            \`\`\`
+            
+            </details>
+            
+            <details><summary>Show Evidence Report</summary>
+            
+            ${evidence}
+            
+            </details>
+            
+            **Artifacts:** Plan files uploaded to workflow artifacts (30 day retention)
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+      - name: Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1

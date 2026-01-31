@@ -1,0 +1,86 @@
+name: Infra - Bootstrap Terraform Backend
+
+on:
+  workflow_dispatch:
+    inputs:
+      aws_account_id:
+        description: 'AWS Account ID (12 digits)'
+        required: true
+        type: string
+      aws_region:
+        description: 'AWS Region'
+        required: false
+        default: 'us-west-2'
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  bootstrap:
+    name: Bootstrap Backend
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Validate Account ID
+        run: |
+          if ! [[ "${{ github.event.inputs.aws_account_id }}" =~ ^[0-9]{12}$ ]]; then
+            echo "❌ Invalid AWS Account ID. Must be 12 digits."
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+
+      - name: Configure AWS credentials (OIDC)
+        id: aws-oidc
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ github.event.inputs.aws_region }}
+
+      - name: Configure AWS credentials (fallback)
+        if: steps.aws-oidc.outcome == 'failure'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.inputs.aws_region }}
+
+      - name: Terraform Init
+        working-directory: infra/leviathan_k3s_ec2/backend
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: infra/leviathan_k3s_ec2/backend
+        run: |
+          terraform plan \
+            -var="aws_account_id=${{ github.event.inputs.aws_account_id }}" \
+            -var="aws_region=${{ github.event.inputs.aws_region }}" \
+            -out=tfplan.binary
+
+      - name: Terraform Apply
+        working-directory: infra/leviathan_k3s_ec2/backend
+        run: terraform apply -auto-approve tfplan.binary
+
+      - name: Output Backend Config
+        working-directory: infra/leviathan_k3s_ec2/backend
+        run: |
+          echo "✅ Backend successfully bootstrapped!"
+          echo ""
+          echo "📋 Backend Configuration:"
+          terraform output -raw backend_config
+          echo ""
+          echo "🔧 Required GitHub Secrets:"
+          echo "  TF_BACKEND_BUCKET=$(terraform output -raw s3_bucket_name)"
+          echo "  TF_BACKEND_DYNAMODB_TABLE=$(terraform output -raw dynamodb_table_name)"
+          echo ""
+          echo "⚠️ Add these secrets to your repository:"
+          echo "  Settings > Secrets and variables > Actions > New repository secret"

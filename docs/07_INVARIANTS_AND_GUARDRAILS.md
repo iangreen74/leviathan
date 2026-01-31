@@ -146,7 +146,7 @@ command: ["python3", "-m", "leviathan.executor.worker"]  # ✅ Module execution
 **Examples:**
 - Tasks must have `ready: true` to be executable
 - Tasks must have `allowed_paths` within scope prefixes
-- Scope prefixes in DEV: `[.leviathan/, docs/]`
+- Scope prefixes in DEV: `[.leviathan/, docs/, tests/]`
 - No autonomous planning (no task invention)
 
 **Why This Matters:**
@@ -162,7 +162,7 @@ tasks:
   - id: task-1
     ready: true
     allowed_paths:
-      - src/main.py  # ❌ Outside .leviathan/ and docs/
+      - src/main.py  # ❌ Outside .leviathan/, docs/, and tests/
 
 # Scheduler behavior:
 # → Task skipped with log: "scope outside allowed prefixes"
